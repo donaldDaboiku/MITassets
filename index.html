@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#3b82f6">
+  <meta name="description" content="IT asset management, task logs, and operations hub">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="MIT Asset">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <title>MIT Asset — IT Operations Hub</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Login -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <div class="brand login-brand">
+        <span class="brand-icon" id="loginBrandIcon">⚙</span>
+        <div>
+          <strong id="loginBrandName">MIT Asset</strong>
+          <small id="loginBrandTagline">IT Operations Hub</small>
+        </div>
+      </div>
+      <h2>Sign in</h2>
+      <form id="loginForm" class="form" action="#" method="post" novalidate>
+        <label>Username
+          <input type="text" name="username" autocomplete="username" required placeholder="e.g. admin" />
+        </label>
+        <label>Password
+          <input type="password" name="password" autocomplete="current-password" required placeholder="Your password" />
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+      </form>
+      <p class="hint login-hint" id="loginHintList">Loading accounts…</p>
+      <button type="button" class="btn btn-ghost btn-sm" id="repairLoginBtn" style="margin-top:0.75rem">Restore default accounts (admin, john, sarah)</button>
+    </div>
+  </div>
+
+  <div class="app" id="appRoot" hidden>
+    <aside class="sidebar">
+      <div class="brand" id="appBrand">
+        <span class="brand-icon" id="brandIcon">⚙</span>
+        <div>
+          <strong id="brandName">MIT Asset</strong>
+          <small id="brandTagline">IT Operations Hub</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+        <button class="nav-btn" data-view="mywork">My Work <span class="nav-badge" id="myWorkBadge" hidden>0</span></button>
+        <button class="nav-btn" data-view="assets">Assets</button>
+        <button class="nav-btn" data-view="tasks">Task Logs</button>
+        <button class="nav-btn" data-view="documentation">Documentation</button>
+        <button class="nav-btn" data-view="assignments">Assignments</button>
+        <button class="nav-btn" data-view="reports">Reports</button>
+        <button class="nav-btn" data-view="automation">Automation</button>
+        <button class="nav-btn" data-view="storage">Storage</button>
+        <button class="nav-btn" data-view="settings">Settings</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="lastSaved">Not saved yet</span>
+        <button class="btn btn-ghost btn-sm btn-block" id="installAppBtn" hidden>Install App</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h1 id="pageTitle">Dashboard</h1>
+        <div class="topbar-actions">
+          <span class="logged-in-user" id="loggedInUser"></span>
+          <button class="btn btn-ghost btn-sm" id="logoutBtn">Logout</button>
+          <button class="btn btn-ghost notif-btn" id="notifBtn" title="Notifications">
+            🔔 <span class="notif-count" id="notifCount" hidden>0</span>
+          </button>
+          <input type="search" id="globalSearch" placeholder="Search assets, tasks, people…" />
+          <button class="btn btn-ghost" id="quickTaskBtn">+ Quick Task</button>
+        </div>
+      </header>
+
+      <!-- Dashboard -->
+      <section class="view active" id="view-dashboard">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">Total Assets</span>
+            <span class="stat-value" id="statAssets">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Open Tasks</span>
+            <span class="stat-value" id="statOpenTasks">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Assigned Items</span>
+            <span class="stat-value" id="statAssigned">0</span>
+          </div>
+          <div class="stat-card warn">
+            <span class="stat-label">Due / Overdue</span>
+            <span class="stat-value" id="statOverdue">0</span>
+          </div>
+        </div>
+
+        <div class="panel-grid">
+          <div class="panel">
+            <h2>Recent Tasks</h2>
+            <div id="dashRecentTasks" class="list-mini"></div>
+          </div>
+          <div class="panel">
+            <h2>Maintenance Alerts</h2>
+            <div id="dashAlerts" class="list-mini"></div>
+          </div>
+          <div class="panel">
+            <h2>Asset Status</h2>
+            <div id="dashAssetChart" class="chart-bars"></div>
+          </div>
+          <div class="panel">
+            <h2>Team Workload</h2>
+            <div id="dashWorkload" class="list-mini"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- My Work (assignee inbox) -->
+      <section class="view" id="view-mywork">
+        <div class="mywork-header">
+          <p class="hint" id="myWorkGreeting">Sign in to see work assigned to your account.</p>
+        </div>
+        <div class="panel-grid">
+          <div class="panel panel-wide">
+            <h2>My Assigned Tasks</h2>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Priority</th>
+                    <th>Status</th>
+                    <th>Due</th>
+                    <th>Workflow</th>
+                  </tr>
+                </thead>
+                <tbody id="myTasksTable"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>My Assets</h2>
+            <div id="myAssetsList" class="list-mini"></div>
+          </div>
+          <div class="panel">
+            <h2>Notifications</h2>
+            <div id="myNotifications" class="notif-list"></div>
+            <button class="btn btn-ghost btn-sm" id="markAllReadBtn" style="margin-top:0.75rem">Mark all read</button>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:1.5rem">
+          <h2>Task Workflow (automated)</h2>
+          <div class="workflow-steps">
+            <div class="wf-step"><span class="wf-num">1</span><strong>Open</strong><small>New task logged</small></div>
+            <div class="wf-arrow">→</div>
+            <div class="wf-step active-step"><span class="wf-num">2</span><strong>In Progress</strong><small>Auto on assign</small></div>
+            <div class="wf-arrow">→</div>
+            <div class="wf-step"><span class="wf-num">3</span><strong>Resolved</strong><small>You click "Resolve"</small></div>
+            <div class="wf-arrow">→</div>
+            <div class="wf-step"><span class="wf-num">4</span><strong>Closed</strong><small>Auto after 7 days</small></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Assets -->
+      <section class="view" id="view-assets">
+        <div class="toolbar">
+          <button class="btn btn-primary" id="addAssetBtn">+ Add Asset</button>
+          <select id="assetFilterStatus">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="retired">Retired</option>
+            <option value="lost">Lost</option>
+          </select>
+          <select id="assetFilterType">
+            <option value="">All types</option>
+            <option value="laptop">Laptop</option>
+            <option value="desktop">Desktop</option>
+            <option value="monitor">Monitor</option>
+            <option value="server">Server</option>
+            <option value="network">Network</option>
+            <option value="software">Software</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tag</th>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Assigned To</th>
+                <th>Location</th>
+                <th>Next Maintenance</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="assetsTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Tasks -->
+      <section class="view" id="view-tasks">
+        <div class="toolbar">
+          <button class="btn btn-primary" id="addTaskBtn">+ Log Task</button>
+          <label class="filter-label">
+            Date
+            <input type="date" id="taskFilterDate" />
+          </label>
+          <select id="taskFilterDateMode" title="How the date filter applies">
+            <option value="due">Due on date</option>
+            <option value="created">Created on date</option>
+            <option value="either" selected>Due or created</option>
+          </select>
+          <button type="button" class="btn btn-secondary" id="taskDateTodayBtn">Today</button>
+          <button type="button" class="btn btn-ghost" id="taskDateAllBtn">All dates</button>
+          <select id="taskFilterStatus">
+            <option value="">All statuses</option>
+            <option value="open">Open</option>
+            <option value="in-progress">In Progress</option>
+            <option value="resolved">Resolved</option>
+            <option value="closed">Closed</option>
+          </select>
+          <select id="taskFilterPriority">
+            <option value="">All priorities</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+          <span class="hint" id="taskDateSummary" style="margin:0"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Title</th>
+                <th>Category</th>
+                <th>Priority</th>
+                <th>Status</th>
+                <th>Assigned To</th>
+                <th>Due</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tasksTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Documentation -->
+      <section class="view" id="view-documentation">
+        <div class="toolbar">
+          <input type="search" id="docSearch" placeholder="Search resolution docs…" />
+          <select id="docFilterCategory">
+            <option value="">All categories</option>
+            <option value="hardware">Hardware</option>
+            <option value="software">Software</option>
+            <option value="network">Network</option>
+            <option value="security">Security</option>
+            <option value="onboarding">Onboarding</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div id="documentationList" class="doc-list"></div>
+        <div class="panel doc-detail-panel" id="docDetailPanel" hidden>
+          <div class="report-header">
+            <h2 id="docDetailTitle">Resolution Details</h2>
+            <button class="btn btn-ghost" id="closeDocBtn">Close</button>
+          </div>
+          <div id="docDetailBody" class="doc-detail-body"></div>
+        </div>
+      </section>
+
+      <!-- Assignments -->
+      <section class="view" id="view-assignments">
+        <div class="assign-grid">
+          <div class="panel">
+            <h2>Assign Asset or Task</h2>
+            <form id="assignForm" class="form">
+              <label>
+                Item Type
+                <select name="itemType" required>
+                  <option value="asset">Asset</option>
+                  <option value="task">Task</option>
+                </select>
+              </label>
+              <label>
+                Select Item
+                <select name="itemId" id="assignItemSelect" required></select>
+              </label>
+              <label>
+                Assign To
+                <select name="assignee" id="assigneeSelect" required></select>
+              </label>
+              <label>
+                Notes
+                <textarea name="notes" rows="2" placeholder="Reason for assignment…"></textarea>
+              </label>
+              <button type="submit" class="btn btn-primary">Assign</button>
+            </form>
+          </div>
+          <div class="panel">
+            <h2>Reassign</h2>
+            <form id="reassignForm" class="form">
+              <label>
+                Currently Assigned Item
+                <select name="itemKey" id="reassignItemSelect" required></select>
+              </label>
+              <label>
+                New Assignee
+                <select name="newAssignee" id="reassignAssigneeSelect" required></select>
+              </label>
+              <label>
+                Reassignment Notes
+                <textarea name="notes" rows="2" placeholder="Why reassigning…"></textarea>
+              </label>
+              <button type="submit" class="btn btn-secondary">Reassign</button>
+            </form>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:1.5rem">
+          <h2>Assignment History</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Item</th>
+                  <th>Action</th>
+                  <th>From</th>
+                  <th>To</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody id="assignmentHistoryTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Reports -->
+      <section class="view" id="view-reports">
+        <div class="panel">
+          <h2>Generate Report</h2>
+          <form id="reportForm" class="form form-inline">
+            <label>
+              Report Type
+              <select name="reportType">
+                <option value="assets">Asset Inventory</option>
+                <option value="tasks">Task Log Summary</option>
+                <option value="assignments">Assignment History</option>
+                <option value="maintenance">Maintenance Schedule</option>
+                <option value="documentation">Resolution Documentation</option>
+                <option value="full">Full IT Operations Report</option>
+              </select>
+            </label>
+            <label>
+              From
+              <input type="date" name="dateFrom" />
+            </label>
+            <label>
+              To
+              <input type="date" name="dateTo" />
+            </label>
+            <label>
+              Format
+              <select name="format">
+                <option value="preview">Preview</option>
+                <option value="csv">Export CSV</option>
+                <option value="print">Print / PDF</option>
+              </select>
+            </label>
+            <button type="submit" class="btn btn-primary">Generate</button>
+          </form>
+        </div>
+        <div class="panel" id="reportOutputPanel" style="margin-top:1.5rem;display:none">
+          <div class="report-header">
+            <h2 id="reportTitle">Report</h2>
+            <button class="btn btn-ghost" id="closeReportBtn">Close</button>
+          </div>
+          <div id="reportOutput" class="report-output"></div>
+        </div>
+      </section>
+
+      <!-- Automation -->
+      <section class="view" id="view-automation">
+        <div class="panel-grid">
+          <div class="panel">
+            <h2>Auto Rules</h2>
+            <p class="hint">Enable rules to automate routine IT work.</p>
+            <div class="toggle-list" id="automationRules"></div>
+            <div class="workflow-steps compact" style="margin-top:1rem">
+              <div class="wf-step"><strong>Open</strong></div>
+              <div class="wf-arrow">→</div>
+              <div class="wf-step"><strong>In Progress</strong><small>on assign</small></div>
+              <div class="wf-arrow">→</div>
+              <div class="wf-step"><strong>Resolved</strong><small>assignee action</small></div>
+              <div class="wf-arrow">→</div>
+              <div class="wf-step"><strong>Closed</strong><small>auto 7d</small></div>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>Scheduled Actions</h2>
+            <form id="scheduleForm" class="form">
+              <label>
+                Action
+                <select name="action">
+                  <option value="mark-overdue">Mark overdue tasks</option>
+                  <option value="maintenance-reminder">Flag assets due for maintenance</option>
+                  <option value="close-resolved">Auto-close resolved tasks (7+ days)</option>
+                  <option value="backup-reminder">Storage backup reminder</option>
+                </select>
+              </label>
+              <label>
+                Run Every (days)
+                <input type="number" name="intervalDays" min="1" value="7" />
+              </label>
+              <button type="submit" class="btn btn-primary">Save Schedule</button>
+            </form>
+            <div id="scheduleList" class="list-mini" style="margin-top:1rem"></div>
+          </div>
+          <div class="panel">
+            <h2>Bulk Actions</h2>
+            <div class="bulk-actions">
+              <button class="btn btn-secondary" data-bulk="run-automation">Run All Automation Now</button>
+              <button class="btn btn-secondary" data-bulk="notify-overdue">Log Overdue Summary</button>
+              <button class="btn btn-secondary" data-bulk="seed-demo">Load Demo Data</button>
+              <button class="btn btn-danger" data-bulk="clear-resolved">Clear Closed Tasks</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>Automation Log</h2>
+            <div id="automationLog" class="list-mini"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Storage -->
+      <section class="view" id="view-storage">
+        <div class="panel-grid">
+          <div class="panel">
+            <h2>Local Storage</h2>
+            <p class="hint">All data is saved in your browser automatically.</p>
+            <div class="storage-stats" id="storageStats"></div>
+          </div>
+          <div class="panel">
+            <h2>Backup & Restore</h2>
+            <div class="storage-actions">
+              <button class="btn btn-primary" id="exportBtn">Export JSON Backup</button>
+              <label class="btn btn-secondary file-btn">
+                Import Backup
+                <input type="file" id="importFile" accept=".json" hidden />
+              </label>
+            </div>
+            <p class="hint">Export regularly to avoid data loss if browser storage is cleared.</p>
+          </div>
+          <div class="panel" id="teamPanel">
+            <h2>Team Members</h2>
+            <div id="adminStaffSection">
+              <form id="staffForm" class="form form-inline">
+                <input type="text" name="name" placeholder="Name" required />
+                <input type="text" name="username" placeholder="Username (login)" required />
+                <input type="email" name="email" placeholder="Email" />
+                <input type="text" name="role" placeholder="Role (e.g. Technician)" />
+                <button type="submit" class="btn btn-primary">Add</button>
+              </form>
+              <p class="hint">Administrator only. New members get default password: <strong>changeme123</strong></p>
+            </div>
+            <div id="selfPasswordSection" hidden>
+              <p class="hint">Change your own login password.</p>
+              <button type="button" class="btn btn-primary" id="changeMyPasswordBtn">Change My Password</button>
+            </div>
+            <div id="staffList" class="staff-list"></div>
+          </div>
+          <div class="panel danger-zone" id="dangerZonePanel">
+            <h2>Danger Zone</h2>
+            <button class="btn btn-danger" id="clearAllBtn">Clear All Data</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section class="view" id="view-settings">
+        <div class="panel-grid">
+          <div class="panel">
+            <h2>App Branding</h2>
+            <form id="settingsForm" class="form">
+              <label>App Name
+                <input type="text" name="appName" placeholder="MIT Asset" required />
+              </label>
+              <label>Tagline
+                <input type="text" name="tagline" placeholder="IT Operations Hub" />
+              </label>
+              <label>Organization
+                <input type="text" name="organization" placeholder="Your Company Ltd" />
+              </label>
+              <label>Department
+                <input type="text" name="department" placeholder="IT Department" />
+              </label>
+              <label>Contact Email
+                <input type="email" name="contactEmail" placeholder="it@company.com" />
+              </label>
+              <label>Accent Color
+                <input type="color" name="primaryColor" value="#3b82f6" />
+              </label>
+              <label>Logo Emoji (if no image)
+                <input type="text" name="logoEmoji" placeholder="⚙" maxlength="4" />
+              </label>
+              <label>Logo Image
+                <input type="file" name="logoFile" accept="image/*" />
+                <span class="hint">Upload PNG/JPG — auto-resized to fit the sidebar logo box</span>
+              </label>
+              <div class="logo-preview" id="logoPreview"></div>
+              <button type="submit" class="btn btn-primary">Save Settings</button>
+              <button type="button" class="btn btn-ghost" id="resetLogoBtn">Remove Logo Image</button>
+            </form>
+          </div>
+          <div class="panel" id="tagSettingsPanel">
+            <h2>Asset Tag Numbering</h2>
+            <p class="hint">Configure how new asset tags are generated. Admins can edit; everyone sees the next tag when adding assets.</p>
+            <form id="tagSettingsForm" class="form">
+              <label>Tag Prefix
+                <input type="text" name="assetTagPrefix" placeholder="IT" required />
+              </label>
+              <label>Separator
+                <input type="text" name="assetTagSeparator" placeholder="-" maxlength="3" />
+              </label>
+              <label>Number padding (digits)
+                <input type="number" name="assetTagPadding" min="1" max="6" value="3" />
+              </label>
+              <label>Next tag number
+                <input type="number" name="assetTagNextNumber" min="1" value="1" />
+              </label>
+              <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+                Include type code (e.g. IT-LP-001)
+                <input type="checkbox" name="assetTagIncludeType" />
+              </label>
+              <div class="tag-preview-box" id="tagPreviewBox">Next tag: IT-001</div>
+              <button type="submit" class="btn btn-primary" id="saveTagSettingsBtn">Save Tag Settings</button>
+              <button type="button" class="btn btn-secondary" id="syncTagNumberBtn">Sync next # from existing assets</button>
+            </form>
+          </div>
+          <div class="panel">
+            <h2>Preview</h2>
+            <div class="settings-preview" id="settingsPreview">
+              <div class="brand preview-brand">
+                <span class="brand-icon" id="previewIcon">⚙</span>
+                <div>
+                  <strong id="previewName">MIT Asset</strong>
+                  <small id="previewTagline">IT Operations Hub</small>
+                </div>
+              </div>
+              <p class="hint" style="margin-top:1rem">Changes apply across the app sidebar, page title, and reports.</p>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>Email Alerts</h2>
+            <p class="hint">Send email when tasks/assets are assigned. Uses <a href="https://www.emailjs.com/" target="_blank" rel="noopener">EmailJS</a> (free tier).</p>
+            <form id="emailSettingsForm" class="form">
+              <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+                Enable email alerts
+                <input type="checkbox" name="emailAlertsEnabled" />
+              </label>
+              <label>EmailJS Public Key
+                <input type="text" name="emailjsPublicKey" placeholder="your_public_key" />
+              </label>
+              <label>EmailJS Service ID
+                <input type="text" name="emailjsServiceId" placeholder="service_xxxx" />
+              </label>
+              <label>EmailJS Template ID
+                <input type="text" name="emailjsTemplateId" placeholder="template_xxxx" />
+              </label>
+              <p class="hint">Template variables: <code>to_email</code>, <code>to_name</code>, <code>subject</code>, <code>message</code>, <code>item_label</code>, <code>action</code></p>
+              <button type="submit" class="btn btn-primary">Save Email Settings</button>
+              <button type="button" class="btn btn-secondary" id="testEmailBtn">Send Test Email</button>
+            </form>
+          </div>
+          <div class="panel">
+            <h2>Install on Desktop &amp; Phone</h2>
+            <p class="hint">Install as an app for offline access and home-screen shortcut.</p>
+            <ul class="install-steps">
+              <li><strong>Desktop (Chrome/Edge):</strong> Click "Install App" below or use browser menu → Install app.</li>
+              <li><strong>iPhone/iPad:</strong> Safari → Share → Add to Home Screen.</li>
+              <li><strong>Android:</strong> Chrome → menu → Install app, or Add to Home screen.</li>
+            </ul>
+            <button class="btn btn-primary" id="installAppBtn2">Install App</button>
+            <p class="hint">For install to work, serve via localhost or HTTPS (not file://).</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <dialog id="modal">
+    <form id="modalForm" method="dialog" class="form">
+      <h2 id="modalTitle">Form</h2>
+      <div id="modalBody"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="modalCancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="modalSubmit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

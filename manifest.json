@@ -1,0 +1,26 @@
+{
+  "name": "MIT Asset — IT Operations Hub",
+  "short_name": "MIT Asset",
+  "description": "IT asset management, task logs, assignments, and automation",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f1419",
+  "theme_color": "#3b82f6",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["business", "productivity"]
+}
