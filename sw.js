@@ -1,5 +1,5 @@
-const CACHE = 'mit-asset-v3';
-const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.json', './icons/icon.svg'];
+const CACHE = 'mit-asset-v4';
+const ASSETS = ['./', './index.html', './styles.css', './app.js', './cloud.js', './manifest.json', './icons/icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
@@ -19,7 +19,6 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Network-first for app files so updates show immediately
   const isAppFile = /\.(html|js|css|json)$/i.test(url.pathname) || url.pathname.endsWith('/') || url.pathname.endsWith('/index.html');
 
   if (isAppFile) {

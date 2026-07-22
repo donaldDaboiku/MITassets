@@ -570,6 +570,10 @@ dialog.wide {
   margin-bottom: 1rem;
 }
 
+.cloud-error {
+  color: var(--danger) !important;
+}
+
 .hint-inline {
   font-weight: normal;
   color: var(--muted);

@@ -110,6 +110,11 @@ const defaultState = () => ({
     assetTagPadding: 3,
     assetTagNextNumber: 1,
     assetTagIncludeType: false,
+    cloudEnabled: false,
+    supabaseUrl: '',
+    supabaseAnonKey: '',
+    workspaceId: 'main',
+    autoSyncCloud: true,
   },
   lastSaved: null,
 });
@@ -139,11 +144,12 @@ function loadState() {
   return defaultState();
 }
 
-function saveState() {
+function saveState(opts = {}) {
   state.lastSaved = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   const el = document.getElementById('lastSaved');
   if (el) el.textContent = 'Saved ' + new Date(state.lastSaved).toLocaleString();
+  if (!opts.skipCloud) scheduleCloudPush();
 }
 
 function toast(msg) {
@@ -1410,6 +1416,7 @@ function renderStorage() {
       ${actions}
     </div>`;
   }).join('');
+  renderCloudPanel();
 }
 
 function promptNewPassword(label) {
@@ -1973,7 +1980,17 @@ function renderSettings() {
     updateTagPreview();
   }
 
+  const cloudForm = document.getElementById('cloudSettingsForm');
+  if (cloudForm) {
+    cloudForm.cloudEnabled.checked = !!s.cloudEnabled;
+    cloudForm.autoSyncCloud.checked = s.autoSyncCloud !== false;
+    cloudForm.supabaseUrl.value = s.supabaseUrl || '';
+    cloudForm.supabaseAnonKey.value = s.supabaseAnonKey || '';
+    cloudForm.workspaceId.value = s.workspaceId || 'main';
+  }
+
   applyBranding();
+  renderCloudPanel();
 }
 
 function updateTagPreview() {
@@ -2113,12 +2130,16 @@ function renderAll() {
 async function boot() {
   await ensureStaffAuth();
   await normalizeStoredLogo();
+  await syncOnBoot();
+  await ensureStaffAuth();
 
   if (state.lastSaved) {
     document.getElementById('lastSaved').textContent = 'Saved ' + new Date(state.lastSaved).toLocaleString();
   }
 
   applyBrandingToLogin();
+  renderLoginHints();
+  renderCloudPanel();
 
   const sessionId = getSessionUserId();
   if (sessionId && state.staff.some((s) => s.id === sessionId)) {
@@ -2129,7 +2150,7 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=3').then((reg) => {
+    navigator.serviceWorker.register('./sw.js?v=4').then((reg) => {
       reg.update();
     }).catch(() => {});
   }
@@ -2188,6 +2209,40 @@ document.getElementById('emailSettingsForm')?.addEventListener('submit', (e) => 
   saveState();
   toast('Email settings saved');
 });
+
+document.getElementById('cloudSettingsForm')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!isAdmin()) {
+    toast('Only administrators can change cloud settings');
+    return;
+  }
+  const fd = new FormData(e.target);
+  state.settings.cloudEnabled = !!fd.get('cloudEnabled');
+  state.settings.autoSyncCloud = !!fd.get('autoSyncCloud');
+  state.settings.supabaseUrl = (fd.get('supabaseUrl') || '').toString().trim();
+  state.settings.supabaseAnonKey = (fd.get('supabaseAnonKey') || '').toString().trim();
+  state.settings.workspaceId = (fd.get('workspaceId') || 'main').toString().trim() || 'main';
+  saveState({ skipCloud: true });
+  renderCloudPanel();
+  toast('Cloud settings saved');
+  if (state.settings.cloudEnabled) pushToCloud({ silent: false });
+});
+
+document.getElementById('cloudTestBtn')?.addEventListener('click', async () => {
+  const form = document.getElementById('cloudSettingsForm');
+  if (form) {
+    state.settings.cloudEnabled = true;
+    state.settings.supabaseUrl = form.supabaseUrl.value.trim();
+    state.settings.supabaseAnonKey = form.supabaseAnonKey.value.trim();
+    state.settings.workspaceId = form.workspaceId.value.trim() || 'main';
+  }
+  const row = await pullFromCloud({ silent: false });
+  if (row) toast('Connection OK');
+});
+
+document.getElementById('cloudPushBtn')?.addEventListener('click', () => pushToCloud());
+document.getElementById('cloudPullBtn')?.addEventListener('click', () => pullFromCloud());
+document.getElementById('cloudRestoreBtn')?.addEventListener('click', () => restoreFromCloud());
 
 document.getElementById('testEmailBtn')?.addEventListener('click', async () => {
   const user = getCurrentUser();

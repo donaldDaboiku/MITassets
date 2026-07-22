@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <!-- Login -->
@@ -467,7 +467,18 @@
                 <input type="file" id="importFile" accept=".json" hidden />
               </label>
             </div>
-            <p class="hint">Export regularly to avoid data loss if browser storage is cleared.</p>
+            <p class="hint">Export regularly. Browser storage can be cleared — cloud sync protects against that.</p>
+          </div>
+          <div class="panel">
+            <h2>Cloud Storage (Supabase)</h2>
+            <p class="hint" id="cloudStatus">Cloud sync off — configure in Settings</p>
+            <div class="storage-stats" id="cloudMeta"></div>
+            <div class="storage-actions" style="margin-top:0.75rem">
+              <button class="btn btn-primary" id="cloudPushBtn">Push to Cloud</button>
+              <button class="btn btn-secondary" id="cloudPullBtn">Check Cloud</button>
+              <button class="btn btn-secondary" id="cloudRestoreBtn">Restore from Cloud</button>
+            </div>
+            <p class="hint">Setup: create a free <a href="https://supabase.com" target="_blank" rel="noopener">Supabase</a> project → run <code>supabase-setup.sql</code> → paste URL & anon key in Settings.</p>
           </div>
           <div class="panel" id="teamPanel">
             <h2>Team Members</h2>
@@ -569,6 +580,31 @@
             </div>
           </div>
           <div class="panel">
+            <h2>Cloud Sync Settings</h2>
+            <p class="hint">Backs up all app data to Supabase so clearing the browser does not wipe records.</p>
+            <form id="cloudSettingsForm" class="form">
+              <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+                Enable cloud sync
+                <input type="checkbox" name="cloudEnabled" />
+              </label>
+              <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+                Auto-sync after each save
+                <input type="checkbox" name="autoSyncCloud" />
+              </label>
+              <label>Supabase Project URL
+                <input type="url" name="supabaseUrl" placeholder="https://xxxx.supabase.co" />
+              </label>
+              <label>Supabase Anon / Publishable Key
+                <input type="password" name="supabaseAnonKey" placeholder="eyJhbGciOi…" autocomplete="off" />
+              </label>
+              <label>Workspace ID
+                <input type="text" name="workspaceId" placeholder="main" />
+              </label>
+              <button type="submit" class="btn btn-primary">Save Cloud Settings</button>
+              <button type="button" class="btn btn-secondary" id="cloudTestBtn">Test Connection</button>
+            </form>
+          </div>
+          <div class="panel">
             <h2>Email Alerts</h2>
             <p class="hint">Send email when tasks/assets are assigned. Uses <a href="https://www.emailjs.com/" target="_blank" rel="noopener">EmailJS</a> (free tier).</p>
             <form id="emailSettingsForm" class="form">
@@ -620,6 +656,7 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <script src="app.js?v=3"></script>
+  <script src="cloud.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
