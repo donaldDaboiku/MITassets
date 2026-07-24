@@ -1,4 +1,4 @@
-const CACHE = 'mit-asset-v5';
+const CACHE = 'mit-asset-v6';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './cloud.js', './manifest.json', './icons/icon.svg'];
 
 self.addEventListener('install', (e) => {

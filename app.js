@@ -1030,6 +1030,214 @@ document.getElementById('addAssetBtn').addEventListener('click', () => {
   setTimeout(() => wireAssetTagField(true), 0);
 });
 
+const ASSET_IMPORT_HEADERS = [
+  'Tag', 'Name', 'Type', 'Status', 'Serial', 'Location', 'Assigned To', 'Next Maintenance', 'Notes',
+];
+
+const ASSET_TYPE_ALIASES = {
+  laptop: 'laptop', laptops: 'laptop', notebook: 'laptop',
+  desktop: 'desktop', pc: 'desktop', computer: 'desktop',
+  monitor: 'monitor', screen: 'monitor', display: 'monitor',
+  server: 'server',
+  network: 'network', router: 'network', switch: 'network',
+  software: 'software', license: 'software',
+  other: 'other',
+};
+
+const ASSET_STATUS_ALIASES = {
+  active: 'active', inuse: 'active', 'in use': 'active', available: 'active',
+  maintenance: 'maintenance', repair: 'maintenance', repairing: 'maintenance',
+  retired: 'retired', disposed: 'retired', decommissioned: 'retired',
+  lost: 'lost', missing: 'lost', stolen: 'lost',
+};
+
+function normalizeHeader(h) {
+  return String(h || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function excelDateToISO(value) {
+  if (value == null || value === '') return '';
+  if (typeof value === 'number' && window.XLSX?.SSF) {
+    try {
+      const parsed = XLSX.SSF.parse_date_code(value);
+      if (parsed) {
+        const m = String(parsed.m).padStart(2, '0');
+        const d = String(parsed.d).padStart(2, '0');
+        return `${parsed.y}-${m}-${d}`;
+      }
+    } catch (_) {}
+  }
+  const s = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const dt = new Date(s);
+  if (!Number.isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+  return '';
+}
+
+function findStaffByNameOrEmail(value) {
+  if (!value) return '';
+  const q = String(value).trim().toLowerCase();
+  const hit = state.staff.find((s) =>
+    (s.name || '').toLowerCase() === q ||
+    (s.email || '').toLowerCase() === q ||
+    (s.username || '').toLowerCase() === q
+  );
+  return hit?.id || '';
+}
+
+function mapAssetImportRow(row) {
+  const get = (...keys) => {
+    for (const key of keys) {
+      const want = normalizeHeader(key);
+      for (const [k, v] of Object.entries(row)) {
+        if (normalizeHeader(k) === want && v != null && String(v).trim() !== '') {
+          return String(v).trim();
+        }
+      }
+    }
+    return '';
+  };
+
+  const rawType = get('Type', 'Asset Type', 'Category');
+  const rawStatus = get('Status', 'Asset Status');
+  const typeKey = normalizeHeader(rawType).replace(/\s+/g, '');
+  const statusKey = normalizeHeader(rawStatus);
+
+  const tag = get('Tag', 'Asset Tag', 'Asset ID', 'ID');
+  const name = get('Name', 'Asset Name', 'Description', 'Model');
+  if (!tag && !name) return null;
+
+  return {
+    tag: tag || generateAssetTag(ASSET_TYPE_ALIASES[typeKey] || 'other'),
+    name: name || tag || 'Imported Asset',
+    type: ASSET_TYPE_ALIASES[typeKey] || ASSET_TYPE_ALIASES[normalizeHeader(rawType)] || 'other',
+    status: ASSET_STATUS_ALIASES[statusKey] || 'active',
+    serial: get('Serial', 'Serial Number', 'S/N', 'SN'),
+    location: get('Location', 'Site', 'Office'),
+    assignee: findStaffByNameOrEmail(get('Assigned To', 'Assignee', 'User', 'Owner')),
+    nextMaintenance: excelDateToISO(get('Next Maintenance', 'Maintenance Date', 'Next Service')),
+    notes: get('Notes', 'Comment', 'Comments', 'Remark'),
+  };
+}
+
+function downloadAssetWorkbook(rows, filename) {
+  if (!window.XLSX) {
+    toast('Excel library not loaded — refresh the page');
+    return;
+  }
+  const ws = XLSX.utils.json_to_sheet(rows, { header: ASSET_IMPORT_HEADERS });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Assets');
+  XLSX.writeFile(wb, filename);
+}
+
+function downloadAssetTemplate() {
+  downloadAssetWorkbook([{
+    Tag: 'IT-001',
+    Name: 'Dell Latitude 5540',
+    Type: 'laptop',
+    Status: 'active',
+    Serial: 'ABC123',
+    Location: 'HQ Floor 2',
+    'Assigned To': 'John Smith',
+    'Next Maintenance': todayISO(),
+    Notes: 'Sample row — replace with your data',
+  }], 'mit-asset-template.xlsx');
+  toast('Template downloaded');
+}
+
+function exportAssetsToExcel() {
+  const rows = state.assets.map((a) => ({
+    Tag: a.tag || '',
+    Name: a.name || '',
+    Type: a.type || '',
+    Status: a.status || '',
+    Serial: a.serial || '',
+    Location: a.location || '',
+    'Assigned To': staffName(a.assignee) === 'Unassigned' ? '' : staffName(a.assignee),
+    'Next Maintenance': a.nextMaintenance || '',
+    Notes: a.notes || '',
+  }));
+  downloadAssetWorkbook(rows.length ? rows : [{
+    Tag: '', Name: '', Type: '', Status: '', Serial: '', Location: '',
+    'Assigned To': '', 'Next Maintenance': '', Notes: '',
+  }], `mit-assets-export-${Date.now()}.xlsx`);
+  toast(`Exported ${state.assets.length} asset(s)`);
+}
+
+async function importAssetsFromFile(file) {
+  if (!window.XLSX) {
+    toast('Excel library not loaded — refresh the page');
+    return;
+  }
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data, { type: 'array', cellDates: true });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+  if (!rows.length) {
+    toast('No rows found in the sheet');
+    return;
+  }
+
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  rows.forEach((row) => {
+    const mapped = mapAssetImportRow(row);
+    if (!mapped) { skipped++; return; }
+
+    const existing = state.assets.find(
+      (a) => (a.tag || '').toLowerCase() === mapped.tag.toLowerCase()
+    );
+    if (existing) {
+      Object.assign(existing, {
+        name: mapped.name || existing.name,
+        type: mapped.type || existing.type,
+        status: mapped.status || existing.status,
+        serial: mapped.serial || existing.serial,
+        location: mapped.location || existing.location,
+        assignee: mapped.assignee || existing.assignee,
+        nextMaintenance: mapped.nextMaintenance || existing.nextMaintenance,
+        notes: mapped.notes || existing.notes,
+      });
+      updated++;
+    } else {
+      state.assets.push({
+        id: uid(),
+        ...mapped,
+        created: new Date().toISOString(),
+      });
+      bumpTagCounter(mapped.tag);
+      added++;
+    }
+  });
+
+  saveState();
+  renderAll();
+  const summary = document.getElementById('assetImportSummary');
+  if (summary) summary.textContent = `Import: ${added} added, ${updated} updated, ${skipped} skipped`;
+  toast(`Assets imported — ${added} added, ${updated} updated`);
+}
+
+document.getElementById('downloadAssetTemplateBtn')?.addEventListener('click', downloadAssetTemplate);
+document.getElementById('exportAssetsBtn')?.addEventListener('click', exportAssetsToExcel);
+document.getElementById('assetImportFile')?.addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    await importAssetsFromFile(file);
+  } catch (err) {
+    console.error(err);
+    toast('Could not read that file — use .xlsx or .csv');
+  }
+  e.target.value = '';
+});
+
 /* ── Tasks ── */
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -2404,7 +2612,7 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=5').then((reg) => {
+    navigator.serviceWorker.register('./sw.js?v=6').then((reg) => {
       reg.update();
     }).catch(() => {});
   }

@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <!-- Login -->
@@ -198,6 +198,12 @@
       <section class="view" id="view-assets">
         <div class="toolbar">
           <button class="btn btn-primary" id="addAssetBtn">+ Add Asset</button>
+          <label class="btn btn-secondary file-btn">
+            Upload Excel / CSV
+            <input type="file" id="assetImportFile" accept=".xlsx,.xls,.csv" hidden />
+          </label>
+          <button type="button" class="btn btn-ghost" id="downloadAssetTemplateBtn">Download Template</button>
+          <button type="button" class="btn btn-ghost" id="exportAssetsBtn">Export Assets</button>
           <select id="assetFilterStatus">
             <option value="">All statuses</option>
             <option value="active">Active</option>
@@ -215,6 +221,7 @@
             <option value="software">Software</option>
             <option value="other">Other</option>
           </select>
+          <span class="hint" id="assetImportSummary" style="margin:0"></span>
         </div>
         <div class="table-wrap">
           <table>
@@ -683,7 +690,8 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
-  <script src="cloud.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="cloud.js?v=6"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
