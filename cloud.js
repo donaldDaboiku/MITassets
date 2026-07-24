@@ -105,9 +105,14 @@ async function pushToCloud({ silent = false } = {}) {
       throw new Error(errText || `HTTP ${res.status}`);
     }
     lastCloudPushAt = new Date().toISOString();
+    state.settings.lastCloudPushAt = lastCloudPushAt;
     lastCloudError = null;
     setCloudStatus(`Synced to cloud · ${new Date(lastCloudPushAt).toLocaleString()}`);
     if (!silent) toast('Saved to cloud');
+    // Persist push timestamp without recursive cloud push
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (_) {}
     return true;
   } catch (err) {
     lastCloudError = err.message || String(err);

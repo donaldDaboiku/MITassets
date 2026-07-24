@@ -115,6 +115,8 @@ const defaultState = () => ({
     supabaseAnonKey: '',
     workspaceId: 'main',
     autoSyncCloud: true,
+    lastExportAt: null,
+    lastCloudPushAt: null,
   },
   lastSaved: null,
 });
@@ -373,6 +375,7 @@ function showApp() {
   }
   runAutomation();
   renderAll();
+  maybeForcePasswordChange();
 }
 
 function showLogin() {
@@ -450,7 +453,7 @@ function autoResolveLinkedTasks(asset) {
       timeSpent: '',
     });
     task.status = 'resolved';
-    task.resolvedAt = new Date().toISOString();
+    applyResolveTiming(task);
     if (task.assignee) {
       notifyUser(task.assignee, 'Auto-Resolved', task.title, 'task', task.id, `Asset ${asset.tag} maintenance completed`);
     }
@@ -468,7 +471,6 @@ function handleMaintenanceComplete(asset, prevStatus) {
 window.completeMaintenance = function (id) {
   const asset = state.assets.find((a) => a.id === id);
   if (!asset) return;
-  const prev = asset.status;
   asset.status = 'active';
   asset.lastMaintenanceAt = new Date().toISOString();
   const today = new Date().toISOString().slice(0, 10);
@@ -480,6 +482,194 @@ window.completeMaintenance = function (id) {
   renderAll();
   toast(resolved ? `Maintenance complete — ${resolved} linked task(s) auto-resolved` : 'Maintenance marked complete');
 };
+
+window.showAssetQr = function (id) {
+  const asset = state.assets.find((a) => a.id === id);
+  if (!asset) return;
+  const payload = JSON.stringify({
+    tag: asset.tag,
+    name: asset.name,
+    type: asset.type,
+    serial: asset.serial || '',
+    location: asset.location || '',
+  });
+  const body = `
+    <p class="hint">Scan to identify asset <strong>${esc(asset.tag)}</strong></p>
+    <div style="display:flex;justify-content:center;padding:0.5rem 0">
+      <canvas id="assetQrCanvas" width="180" height="180"></canvas>
+    </div>
+    <p class="hint" style="text-align:center;margin:0">${esc(asset.tag)} — ${esc(asset.name)}</p>
+    <button type="button" class="btn btn-secondary btn-block" id="printQrBtn">Print Label</button>
+  `;
+  openModal(`Asset QR · ${asset.tag}`, 'qr', id, body);
+  setTimeout(() => {
+    const canvas = document.getElementById('assetQrCanvas');
+    if (canvas && window.QRCode) {
+      QRCode.toCanvas(canvas, payload, { width: 180, margin: 1 }, () => {});
+    } else if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, 180, 180);
+      ctx.fillStyle = '#000';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(asset.tag, 20, 90);
+    }
+    document.getElementById('printQrBtn')?.addEventListener('click', () => {
+      const w = window.open('', '_blank');
+      if (!w) return;
+      const dataUrl = canvas?.toDataURL?.() || '';
+      w.document.write(`<!DOCTYPE html><html><head><title>${asset.tag}</title>
+        <style>body{font-family:sans-serif;text-align:center;padding:24px} img{width:200px;height:200px}</style></head>
+        <body><h2>${esc(asset.tag)}</h2><p>${esc(asset.name)}</p>
+        <img src="${dataUrl}" alt="QR"/><p>${esc(asset.location || '')}</p>
+        <script>window.onload=()=>window.print()<\/script></body></html>`);
+      w.document.close();
+    });
+  }, 50);
+};
+
+function printDailySheet() {
+  const dateF = document.getElementById('taskFilterDate')?.value || todayISO();
+  const dateMode = document.getElementById('taskFilterDateMode')?.value || 'either';
+  const list = state.tasks.filter((t) => {
+    const due = taskDateKey(t.dueDate);
+    const created = taskDateKey(t.created);
+    if (dateMode === 'due') return due === dateF;
+    if (dateMode === 'created') return created === dateF;
+    return due === dateF || created === dateF;
+  }).sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
+
+  const rows = list.map((t) => {
+    const ttr = ['resolved', 'closed'].includes(t.status)
+      ? timeToResolveLabel(t)
+      : formatDuration(Date.now() - new Date(taskStartTime(t) || Date.now()).getTime());
+    return `<tr>
+      <td>${esc(t.title)}</td>
+      <td>${esc(t.priority)}</td>
+      <td>${esc(t.status)}</td>
+      <td>${esc(staffName(t.assignee))}</td>
+      <td>${esc(fmtDate(t.dueDate))}</td>
+      <td>${esc(ttr)}</td>
+      <td style="width:120px"></td>
+    </tr>`;
+  }).join('');
+
+  const w = window.open('', '_blank');
+  if (!w) { toast('Allow pop-ups to print'); return; }
+  const brand = state.settings.appName || 'MIT Asset';
+  w.document.write(`<!DOCTYPE html><html><head><title>Daily Tasks ${dateF}</title>
+    <style>
+      body{font-family:Segoe UI,sans-serif;padding:24px;color:#111}
+      h1{margin:0 0 4px} .meta{color:#555;margin-bottom:16px}
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      th,td{border:1px solid #ccc;padding:8px;text-align:left}
+      th{background:#f3f4f6}
+      @media print{button{display:none}}
+    </style></head><body>
+    <h1>${esc(brand)} · Daily Task Sheet</h1>
+    <div class="meta">${esc(dateF === todayISO() ? 'Today' : dateF)} · ${list.length} task(s) · Printed ${new Date().toLocaleString()}</div>
+    <table>
+      <thead><tr><th>Title</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Due</th><th>Age / TTR</th><th>Done</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="7">No tasks for this date</td></tr>'}</tbody>
+    </table>
+    <p style="margin-top:16px"><button onclick="window.print()">Print</button></p>
+    <script>window.onload=()=>setTimeout(()=>window.print(),300)<\/script>
+    </body></html>`);
+  w.document.close();
+}
+
+function maybeForcePasswordChange() {
+  const user = getCurrentUser();
+  if (!user?.mustChangePassword) return;
+  toast('Please change your temporary password');
+  setTimeout(() => {
+    const pw = promptNewPassword(`Welcome ${user.name} — set a new password`);
+    if (!pw) {
+      toast('Password change required — use Storage → Change My Password');
+      return;
+    }
+    user.passwordHash = hashPasswordSync(pw);
+    user.mustChangePassword = false;
+    saveState();
+    toast('Password updated');
+  }, 400);
+}
+
+window.deleteAsset = function (id) {
+  if (!isAdmin()) { toast('Only administrators can delete assets'); return; }
+  if (!confirm('Delete this asset?')) return;
+  state.assets = state.assets.filter((a) => a.id !== id);
+  saveState();
+  renderAll();
+  toast('Asset deleted');
+};
+
+window.deleteTask = function (id) {
+  if (!isAdmin()) { toast('Only administrators can delete tasks'); return; }
+  if (!confirm('Delete this task?')) return;
+  state.tasks = state.tasks.filter((t) => t.id !== id);
+  state.documentation = state.documentation.filter((d) => d.taskId !== id);
+  saveState();
+  renderAll();
+  toast('Task deleted');
+};
+
+
+function formatDuration(ms) {
+  if (ms == null || Number.isNaN(ms) || ms < 0) return '—';
+  const totalMin = Math.round(ms / 60000);
+  if (totalMin < 60) return `${totalMin}m`;
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  if (hours < 48) return mins ? `${hours}h ${mins}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remH = hours % 24;
+  return remH ? `${days}d ${remH}h` : `${days}d`;
+}
+
+function taskStartTime(task) {
+  return task.startedAt || task.created || null;
+}
+
+function calcTimeToResolve(task, resolvedAt = null) {
+  const end = resolvedAt || task.resolvedAt;
+  const start = taskStartTime(task);
+  if (!end || !start) return null;
+  return new Date(end).getTime() - new Date(start).getTime();
+}
+
+function timeToResolveLabel(task) {
+  if (task.timeToResolveLabel) return task.timeToResolveLabel;
+  const ms = task.timeToResolveMs != null ? task.timeToResolveMs : calcTimeToResolve(task);
+  return formatDuration(ms);
+}
+
+function applyResolveTiming(task, resolvedAtIso) {
+  const resolvedAt = resolvedAtIso || new Date().toISOString();
+  task.resolvedAt = resolvedAt;
+  const ms = calcTimeToResolve(task, resolvedAt);
+  task.timeToResolveMs = ms;
+  task.timeToResolveLabel = formatDuration(ms);
+  return ms;
+}
+
+function weekBounds() {
+  const now = new Date();
+  const day = now.getDay();
+  const diffToMon = day === 0 ? 6 : day - 1;
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - diffToMon);
+  return { start, end: now };
+}
+
+function inThisWeek(iso) {
+  if (!iso) return false;
+  const { start, end } = weekBounds();
+  const t = new Date(iso).getTime();
+  return t >= start.getTime() && t <= end.getTime();
+}
+
 
 function getCurrentUser() {
   const id = getSessionUserId() || state.currentUserId;
@@ -509,9 +699,9 @@ function advanceTaskStatus(taskId, newStatus, resolutionData) {
 
   const prev = task.status;
   task.status = newStatus;
-  if (newStatus === 'in-progress') task.startedAt = new Date().toISOString();
+  if (newStatus === 'in-progress') task.startedAt = task.startedAt || new Date().toISOString();
   if (newStatus === 'resolved') {
-    task.resolvedAt = new Date().toISOString();
+    applyResolveTiming(task);
     if (resolutionData) saveResolutionDoc(task, resolutionData);
   }
   if (newStatus === 'closed') task.closedAt = new Date().toISOString();
@@ -525,6 +715,9 @@ function advanceTaskStatus(taskId, newStatus, resolutionData) {
 
 function saveResolutionDoc(task, data) {
   const resolvedBy = state.currentUserId || task.assignee || null;
+  if (!task.resolvedAt) applyResolveTiming(task);
+  const ttrMs = task.timeToResolveMs != null ? task.timeToResolveMs : calcTimeToResolve(task);
+  const ttrLabel = formatDuration(ttrMs);
   const entry = {
     id: uid(),
     taskId: task.id,
@@ -534,13 +727,17 @@ function saveResolutionDoc(task, data) {
     whatWasDone: data.whatWasDone,
     stepsTaken: data.stepsTaken || '',
     partsUsed: data.partsUsed || '',
-    timeSpent: data.timeSpent || '',
+    timeSpent: data.timeSpent || ttrLabel || '',
+    timeToResolveMs: ttrMs,
+    timeToResolveLabel: ttrLabel,
     resolvedBy,
-    resolvedAt: new Date().toISOString(),
+    resolvedAt: task.resolvedAt || new Date().toISOString(),
   };
 
   task.resolutionNotes = data.whatWasDone;
   task.resolutionDocId = entry.id;
+  task.timeToResolveMs = ttrMs;
+  task.timeToResolveLabel = ttrLabel;
 
   const existing = state.documentation.findIndex((d) => d.taskId === task.id);
   if (existing >= 0) state.documentation[existing] = entry;
@@ -558,8 +755,10 @@ window.resolveTask = function (id) {
 window.closeTask = (id) => advanceTaskStatus(id, 'closed');
 
 function resolveFormFields(task) {
+  const elapsed = formatDuration(Date.now() - new Date(taskStartTime(task) || Date.now()).getTime());
   return `
     <p class="hint">Describe what was done to fix "<strong>${esc(task.title)}</strong>". This is saved in Documentation.</p>
+    <p class="hint">Elapsed so far: <strong>${esc(elapsed)}</strong> (from start/create to now)</p>
     <label>What was done to resolve it? *
       <textarea name="whatWasDone" rows="4" required placeholder="e.g. Replaced faulty keyboard, updated drivers, tested all keys…">${esc(task.resolutionNotes || '')}</textarea>
     </label>
@@ -569,8 +768,8 @@ function resolveFormFields(task) {
     <label>Parts / tools used
       <input name="partsUsed" placeholder="e.g. Dell KB216 keyboard, screwdriver kit" />
     </label>
-    <label>Time spent
-      <input name="timeSpent" placeholder="e.g. 45 minutes" />
+    <label>Time spent (manual note)
+      <input name="timeSpent" value="${esc(elapsed)}" placeholder="e.g. 45 minutes" />
     </label>
   `;
 }
@@ -589,6 +788,7 @@ window.viewDocumentation = function (docId) {
   document.getElementById('docDetailTitle').textContent = doc.taskTitle;
   document.getElementById('docDetailBody').innerHTML = `
     <div class="doc-field"><strong>Resolved</strong>${new Date(doc.resolvedAt).toLocaleString()} by ${esc(staffName(doc.resolvedBy))}</div>
+    <div class="doc-field"><strong>Time to resolve</strong>${esc(doc.timeToResolveLabel || formatDuration(doc.timeToResolveMs) || '—')}</div>
     <div class="doc-field"><strong>Category</strong>${esc(doc.category)} · ${badge(doc.priority, doc.priority)}</div>
     <div class="doc-field"><strong>What was done</strong><div class="doc-resolution">${esc(doc.whatWasDone)}</div></div>
     ${doc.stepsTaken ? `<div class="doc-field"><strong>Steps taken</strong><div class="doc-resolution">${esc(doc.stepsTaken)}</div></div>` : ''}
@@ -663,6 +863,46 @@ function renderDashboard() {
   document.getElementById('statAssigned').textContent = assigned;
   document.getElementById('statOverdue').textContent = overdue;
 
+  const weekResolved = tasks.filter((t) => t.resolvedAt && inThisWeek(t.resolvedAt));
+  const weekOpened = tasks.filter((t) => inThisWeek(t.created));
+  document.getElementById('statWeekResolved').textContent = weekResolved.length;
+  document.getElementById('statWeekOpened').textContent = weekOpened.length;
+
+  const ttrValues = weekResolved
+    .map((t) => t.timeToResolveMs != null ? t.timeToResolveMs : calcTimeToResolve(t))
+    .filter((v) => v != null && v >= 0);
+  const avgTtr = ttrValues.length
+    ? formatDuration(ttrValues.reduce((a, b) => a + b, 0) / ttrValues.length)
+    : '—';
+  document.getElementById('statAvgTtr').textContent = avgTtr;
+
+  const backupEl = document.getElementById('statBackupHealth');
+  const card = document.getElementById('backupReminderCard');
+  const lastPush = typeof lastCloudPushAt !== 'undefined' ? lastCloudPushAt : null;
+  const lastExport = state.settings.lastExportAt || null;
+  const lastCloud = lastPush || state.settings.lastCloudPushAt || null;
+  const newestBackup = [lastCloud, lastExport].filter(Boolean).sort().pop();
+  const daysSince = newestBackup
+    ? Math.floor((Date.now() - new Date(newestBackup).getTime()) / 86400000)
+    : 99;
+  if (cloudConfigured() && daysSince <= 2) {
+    backupEl.textContent = 'Cloud OK';
+    card.classList.remove('warn');
+  } else if (daysSince <= 7 && lastExport) {
+    backupEl.textContent = 'Export OK';
+    card.classList.remove('warn');
+  } else {
+    backupEl.textContent = cloudConfigured() ? 'Sync / export soon' : 'Export recommended';
+    card.classList.add('warn');
+  }
+
+  const weekMax = Math.max(weekOpened.length, weekResolved.length, 1);
+  document.getElementById('dashWeekChart').innerHTML = `
+    <div class="bar-row"><span>Opened</span><div class="bar-track"><div class="bar-fill" style="width:${(weekOpened.length / weekMax) * 100}%"></div></div><span>${weekOpened.length}</span></div>
+    <div class="bar-row"><span>Resolved</span><div class="bar-track"><div class="bar-fill" style="width:${(weekResolved.length / weekMax) * 100}%"></div></div><span>${weekResolved.length}</span></div>
+    <div class="list-item" style="margin-top:0.75rem"><span>Avg time to resolve (this week)</span><strong>${esc(avgTtr)}</strong></div>
+  `;
+
   const recent = [...tasks].sort((a, b) => new Date(b.created) - new Date(a.created)).slice(0, 5);
   document.getElementById('dashRecentTasks').innerHTML = recent.length
     ? recent.map((t) => `<div class="list-item"><span>${esc(t.title)}</span>${badge(t.status, t.status)}</div>`).join('')
@@ -679,6 +919,7 @@ function renderDashboard() {
       alerts.push(`Overdue: ${esc(t.title)}`);
     }
   });
+  if (daysSince > 7) alerts.unshift('Weekly backup overdue — export or push to cloud');
   document.getElementById('dashAlerts').innerHTML = alerts.length
     ? alerts.slice(0, 5).map((a) => `<div class="list-item"><span>${a}</span></div>`).join('')
     : '<div class="empty-state">No alerts</div>';
@@ -718,7 +959,7 @@ function renderAssets() {
 
   const tbody = document.getElementById('assetsTable');
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No assets found. Click "+ Add Asset" to get started.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No assets found. Click "+ Add Asset" to get started.</td></tr>';
     return;
   }
 
@@ -733,8 +974,9 @@ function renderAssets() {
       <td>${fmtDate(a.nextMaintenance)}</td>
       <td>
         <button class="btn btn-sm btn-ghost" onclick="editAsset('${a.id}')">Edit</button>
+        <button class="btn btn-sm btn-secondary" onclick="showAssetQr('${a.id}')">QR</button>
         ${a.status === 'maintenance' ? `<button class="btn btn-sm btn-primary" onclick="completeMaintenance('${a.id}')">Complete</button>` : ''}
-        <button class="btn btn-sm btn-danger" onclick="deleteAsset('${a.id}')">Del</button>
+        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteAsset('${a.id}')">Del</button>` : ''}
       </td>
     </tr>
   `).join('');
@@ -781,14 +1023,6 @@ function assetFormFields(a = {}, isNew = false) {
 window.editAsset = function (id) {
   const a = state.assets.find((x) => x.id === id);
   openModal('Edit Asset', 'asset', id, assetFormFields(a, false));
-};
-
-window.deleteAsset = function (id) {
-  if (!confirm('Delete this asset?')) return;
-  state.assets = state.assets.filter((a) => a.id !== id);
-  saveState();
-  renderAll();
-  toast('Asset deleted');
 };
 
 document.getElementById('addAssetBtn').addEventListener('click', () => {
@@ -861,11 +1095,15 @@ function renderTasks() {
     const emptyMsg = dateF
       ? `No tasks for ${dateF === todayISO() ? 'today' : fmtDate(dateF)}. Try "All dates" or change the date.`
       : 'No tasks found. Click "+ Log Task" to create one.';
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${emptyMsg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${emptyMsg}</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = list.map((t) => `
+  tbody.innerHTML = list.map((t) => {
+    const ttr = ['resolved', 'closed'].includes(t.status)
+      ? timeToResolveLabel(t)
+      : formatDuration(Date.now() - new Date(taskStartTime(t) || Date.now()).getTime());
+    return `
     <tr>
       <td><code>${esc(t.id.slice(-6).toUpperCase())}</code></td>
       <td>${esc(t.title)}</td>
@@ -874,14 +1112,15 @@ function renderTasks() {
       <td>${badge(t.status, t.status)}</td>
       <td>${esc(staffName(t.assignee))}</td>
       <td>${fmtDate(t.dueDate)}</td>
+      <td>${esc(ttr)}</td>
       <td>
         <button class="btn btn-sm btn-ghost" onclick="editTask('${t.id}')">Edit</button>
         ${workflowButtons(t)}
         ${(t.resolutionDocId || t.resolutionNotes) ? `<button class="btn btn-sm btn-ghost" onclick="viewTaskDoc('${t.id}')">Doc</button>` : ''}
-        <button class="btn btn-sm btn-danger" onclick="deleteTask('${t.id}')">Del</button>
+        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteTask('${t.id}')">Del</button>` : ''}
       </td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 function taskFormFields(t = {}) {
@@ -933,15 +1172,6 @@ function taskFormFields(t = {}) {
 window.editTask = function (id) {
   const t = state.tasks.find((x) => x.id === id);
   openModal('Edit Task', 'task', id, taskFormFields(t));
-};
-
-window.deleteTask = function (id) {
-  if (!confirm('Delete this task?')) return;
-  state.tasks = state.tasks.filter((t) => t.id !== id);
-  state.documentation = state.documentation.filter((d) => d.taskId !== id);
-  saveState();
-  renderAll();
-  toast('Task deleted');
 };
 
 document.getElementById('addTaskBtn').addEventListener('click', () => {
@@ -1157,16 +1387,16 @@ function buildReport(type, from, to) {
   if (type === 'documentation') {
     title = 'Resolution Documentation';
     const docs = state.documentation.filter((d) => inRange(d.resolvedAt));
-    rows = [['Task', 'Category', 'Resolved By', 'Date', 'What Was Done', 'Time Spent']];
+    rows = [['Task', 'Category', 'Resolved By', 'Date', 'Time to Resolve', 'What Was Done', 'Time Spent']];
     docs.forEach((d) => {
-      rows.push([d.taskTitle, d.category, staffName(d.resolvedBy), fmtDate(d.resolvedAt), d.whatWasDone, d.timeSpent || '']);
+      rows.push([d.taskTitle, d.category, staffName(d.resolvedBy), fmtDate(d.resolvedAt), d.timeToResolveLabel || formatDuration(d.timeToResolveMs) || '', d.whatWasDone, d.timeSpent || '']);
     });
     html = `<div class="report-meta">Generated: ${now} · ${esc(state.settings.organization || state.settings.appName)}</div>`;
     html += `<h3>Resolution Docs (${docs.length})</h3>`;
     docs.forEach((d) => {
       html += `<div style="margin-bottom:1.25rem;padding-bottom:1rem;border-bottom:1px solid #2d3a4f">
         <h4>${esc(d.taskTitle)}</h4>
-        <p class="report-meta">${fmtDate(d.resolvedAt)} · ${esc(staffName(d.resolvedBy))} · ${esc(d.category)}</p>
+        <p class="report-meta">${fmtDate(d.resolvedAt)} · ${esc(staffName(d.resolvedBy))} · ${esc(d.category)} · TTR: ${esc(d.timeToResolveLabel || formatDuration(d.timeToResolveMs) || '—')}</p>
         <p>${esc(d.whatWasDone)}</p>
         ${d.stepsTaken ? `<p><em>Steps:</em> ${esc(d.stepsTaken)}</p>` : ''}
       </div>`;
@@ -1341,8 +1571,11 @@ function seedDemoData() {
     { id: uid(), title: 'Setup new employee laptop', category: 'onboarding', priority: 'high', status: 'in-progress', assignee: staff[1]?.id, dueDate: addDays(3), description: 'Configure Windows, install apps, join domain', created: new Date().toISOString() },
     { id: maintTaskId, title: 'Server RAM upgrade — IT-SV-003', category: 'maintenance', priority: 'high', status: 'in-progress', assignee: staff[0]?.id, dueDate: addDays(2), description: 'Upgrade RAM on PowerEdge R740', linkedAssetId: serverId, created: new Date().toISOString() },
     { id: uid(), title: 'Renew SSL certificate', category: 'security', priority: 'critical', status: 'open', assignee: staff[0]?.id, dueDate: addDays(7), description: 'Portal SSL expires next week', created: new Date().toISOString() },
-    { id: resolvedTaskId, title: 'Replace faulty keyboard', category: 'hardware', priority: 'low', status: 'resolved', assignee: staff[2]?.id, dueDate: addDays(-1), description: 'Keyboard on IT-LP-001', created: addDays(-5), resolvedAt: new Date().toISOString(), resolutionNotes: 'Replaced Dell KB216 keyboard on IT-LP-001. Tested all keys and shortcuts.' },
+    { id: resolvedTaskId, title: 'Replace faulty keyboard', category: 'hardware', priority: 'low', status: 'resolved', assignee: staff[2]?.id, dueDate: addDays(-1), description: 'Keyboard on IT-LP-001', created: addDays(-5), startedAt: addDays(-5) + 'T09:00:00.000Z', resolvedAt: new Date().toISOString(), resolutionNotes: 'Replaced Dell KB216 keyboard on IT-LP-001. Tested all keys and shortcuts.' },
   );
+
+  const resolvedTask = state.tasks.find((t) => t.id === resolvedTaskId);
+  if (resolvedTask) applyResolveTiming(resolvedTask, resolvedTask.resolvedAt);
 
   const docId = uid();
   state.documentation.push({
@@ -1354,11 +1587,13 @@ function seedDemoData() {
     whatWasDone: 'Replaced Dell KB216 keyboard on IT-LP-001. Tested all keys and shortcuts.',
     stepsTaken: '1. Confirmed keys E, R sticking\n2. Swapped keyboard\n3. Verified in BIOS and Windows',
     partsUsed: 'Dell KB216 keyboard',
-    timeSpent: '30 minutes',
+    timeSpent: resolvedTask?.timeToResolveLabel || '30 minutes',
+    timeToResolveMs: resolvedTask?.timeToResolveMs,
+    timeToResolveLabel: resolvedTask?.timeToResolveLabel,
     resolvedBy: staff[2]?.id,
-    resolvedAt: new Date().toISOString(),
+    resolvedAt: resolvedTask?.resolvedAt || new Date().toISOString(),
   });
-  state.tasks.find((t) => t.id === resolvedTaskId).resolutionDocId = docId;
+  resolvedTask.resolutionDocId = docId;
 
   saveState();
   renderAll();
@@ -1439,6 +1674,7 @@ window.changeMyPassword = function () {
   const pw = promptNewPassword(`Change password for ${current.name}`);
   if (!pw) return;
   current.passwordHash = hashPasswordSync(pw);
+  current.mustChangePassword = false;
   saveState();
   toast('Your password has been updated');
 };
@@ -1508,15 +1744,16 @@ document.getElementById('staffForm').addEventListener('submit', async (e) => {
     id: uid(),
     name: fd.get('name'),
     email: fd.get('email'),
-    role: fd.get('role'),
+    role: fd.get('role') || 'Technician',
     username,
     passwordHash: hashPasswordSync(defaultPw),
+    mustChangePassword: true,
   });
   saveState();
   e.target.reset();
   renderAll();
   renderLoginHints();
-  toast(`Added ${fd.get('name')} — login: ${username} / ${defaultPw}`);
+  toast(`Added ${fd.get('name')} — login: ${username} / ${defaultPw} (must change password)`);
 });
 
 document.getElementById('exportBtn').addEventListener('click', () => {
@@ -1525,10 +1762,17 @@ document.getElementById('exportBtn').addEventListener('click', () => {
   a.href = URL.createObjectURL(blob);
   a.download = `mit-asset-backup-${Date.now()}.json`;
   a.click();
+  state.settings.lastExportAt = new Date().toISOString();
+  saveState({ skipCloud: true });
   toast('Backup exported');
 });
 
 document.getElementById('importFile').addEventListener('change', (e) => {
+  if (!isAdmin()) {
+    toast('Only administrators can import backups');
+    e.target.value = '';
+    return;
+  }
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
@@ -1607,7 +1851,7 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
       Object.assign(t, data);
       if (data.status === 'in-progress' && prevStatus === 'open') t.startedAt = new Date().toISOString();
       if (data.status === 'resolved' && prevStatus !== 'resolved') {
-        t.resolvedAt = new Date().toISOString();
+        applyResolveTiming(t);
         if (data.resolutionNotes) {
           saveResolutionDoc(t, {
             whatWasDone: data.resolutionNotes,
@@ -1633,6 +1877,9 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
         notifyUser(newTask.assignee, 'Assigned', newTask.title, 'task', newTask.id, '');
       }
     }
+  } else if (modalMode === 'qr') {
+    document.getElementById('modal').close();
+    return;
   } else if (modalMode === 'resolve') {
     const task = state.tasks.find((x) => x.id === editId);
     if (!task) return;
@@ -1640,15 +1887,15 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
       toast('Please describe what was done to resolve the task');
       return;
     }
-    saveResolutionDoc(task, data);
     const prev = task.status;
     task.status = 'resolved';
-    task.resolvedAt = new Date().toISOString();
-    logAutomation('Status Change', `${task.title}: ${prev} → resolved`);
+    applyResolveTiming(task);
+    saveResolutionDoc(task, data);
+    logAutomation('Status Change', `${task.title}: ${prev} → resolved (${task.timeToResolveLabel})`);
     document.getElementById('modal').close();
     saveState();
     renderAll();
-    toast('Task resolved & documented');
+    toast(`Resolved in ${task.timeToResolveLabel}`);
     return;
   }
 
@@ -1681,6 +1928,8 @@ document.getElementById('taskDateAllBtn')?.addEventListener('click', () => {
   renderTasks();
 });
 
+document.getElementById('printDailyBtn')?.addEventListener('click', printDailySheet);
+
 document.getElementById('globalSearch').addEventListener('input', renderAll);
 
 /* ── Utils ── */
@@ -1700,7 +1949,7 @@ function renderMyWork() {
 
   if (!user) {
     greeting.textContent = 'Sign in to see work assigned to your account.';
-    myTasks.innerHTML = '<tr><td colspan="5" class="empty-state">No user selected</td></tr>';
+    myTasks.innerHTML = '<tr><td colspan="6" class="empty-state">No user selected</td></tr>';
     myAssets.innerHTML = '<div class="empty-state">No user selected</div>';
     myNotifs.innerHTML = '<div class="empty-state">No user selected</div>';
     return;
@@ -1710,16 +1959,21 @@ function renderMyWork() {
 
   const tasks = state.tasks.filter((t) => t.assignee === user.id && t.status !== 'closed');
   myTasks.innerHTML = tasks.length
-    ? tasks.map((t) => `
+    ? tasks.map((t) => {
+      const age = ['resolved', 'closed'].includes(t.status)
+        ? timeToResolveLabel(t)
+        : formatDuration(Date.now() - new Date(taskStartTime(t) || Date.now()).getTime());
+      return `
       <tr>
         <td>${esc(t.title)}</td>
         <td>${badge(t.priority, t.priority)}</td>
         <td>${badge(t.status, t.status)}</td>
         <td>${fmtDate(t.dueDate)}</td>
+        <td>${esc(age)}</td>
         <td>${workflowButtons(t)}</td>
-      </tr>
-    `).join('')
-    : '<tr><td colspan="5" class="empty-state">No tasks assigned to you</td></tr>';
+      </tr>`;
+    }).join('')
+    : '<tr><td colspan="6" class="empty-state">No tasks assigned to you</td></tr>';
 
   const assets = state.assets.filter((a) => a.assignee === user.id);
   myAssets.innerHTML = assets.length
@@ -1923,7 +2177,7 @@ function renderDocumentation() {
     ? docs.map((d) => `
       <div class="doc-card" onclick="viewDocumentation('${d.id}')">
         <h3>${esc(d.taskTitle)}</h3>
-        <div class="doc-meta">${fmtDate(d.resolvedAt)} · ${esc(staffName(d.resolvedBy))} · ${badge(d.category, d.category)}</div>
+        <div class="doc-meta">${fmtDate(d.resolvedAt)} · ${esc(staffName(d.resolvedBy))} · TTR ${esc(d.timeToResolveLabel || formatDuration(d.timeToResolveMs) || '—')} · ${badge(d.category, d.category)}</div>
         <div class="doc-excerpt">${esc(d.whatWasDone)}</div>
       </div>
     `).join('')
@@ -2150,7 +2404,7 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=4').then((reg) => {
+    navigator.serviceWorker.register('./sw.js?v=5').then((reg) => {
       reg.update();
     }).catch(() => {});
   }

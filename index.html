@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
   <!-- Login -->
@@ -103,6 +103,25 @@
           </div>
         </div>
 
+        <div class="stats-grid" style="margin-top:0">
+          <div class="stat-card">
+            <span class="stat-label">Resolved This Week</span>
+            <span class="stat-value" id="statWeekResolved">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Opened This Week</span>
+            <span class="stat-value" id="statWeekOpened">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Avg Time to Resolve</span>
+            <span class="stat-value" id="statAvgTtr" style="font-size:1.35rem">—</span>
+          </div>
+          <div class="stat-card" id="backupReminderCard">
+            <span class="stat-label">Backup Health</span>
+            <span class="stat-value" id="statBackupHealth" style="font-size:1rem">Checking…</span>
+          </div>
+        </div>
+
         <div class="panel-grid">
           <div class="panel">
             <h2>Recent Tasks</h2>
@@ -119,6 +138,10 @@
           <div class="panel">
             <h2>Team Workload</h2>
             <div id="dashWorkload" class="list-mini"></div>
+          </div>
+          <div class="panel panel-wide">
+            <h2>This Week · Open vs Resolved</h2>
+            <div id="dashWeekChart" class="chart-bars"></div>
           </div>
         </div>
       </section>
@@ -139,6 +162,7 @@
                     <th>Priority</th>
                     <th>Status</th>
                     <th>Due</th>
+                    <th>Age / TTR</th>
                     <th>Workflow</th>
                   </tr>
                 </thead>
@@ -226,6 +250,7 @@
           </select>
           <button type="button" class="btn btn-secondary" id="taskDateTodayBtn">Today</button>
           <button type="button" class="btn btn-ghost" id="taskDateAllBtn">All dates</button>
+          <button type="button" class="btn btn-secondary" id="printDailyBtn">Print Daily Sheet</button>
           <select id="taskFilterStatus">
             <option value="">All statuses</option>
             <option value="open">Open</option>
@@ -253,6 +278,7 @@
                 <th>Status</th>
                 <th>Assigned To</th>
                 <th>Due</th>
+                <th>Time to Resolve</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -656,7 +682,8 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <script src="cloud.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+  <script src="cloud.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
