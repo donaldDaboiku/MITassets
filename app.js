@@ -78,6 +78,7 @@ const defaultState = () => ({
     { id: uid(), name: 'John Smith', email: 'john@company.com', role: 'Technician' },
     { id: uid(), name: 'Sarah Lee', email: 'sarah@company.com', role: 'Support' },
   ],
+  users: [],
   assignmentHistory: [],
   notifications: [],
   currentUserId: null,
@@ -138,6 +139,7 @@ function loadState() {
       return {
         ...defaults,
         ...parsed,
+        users: Array.isArray(parsed.users) ? parsed.users : [],
         settings: { ...defaults.settings, ...(parsed.settings || {}) },
         automationRules: { ...defaults.automationRules, ...(parsed.automationRules || {}) },
       };
@@ -166,6 +168,20 @@ function badge(cls, text) {
   return `<span class="badge badge-${cls}">${text}</span>`;
 }
 
+function debounce(fn, wait = 180) {
+  let t = null;
+  return function debounced(...args) {
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), wait);
+  };
+}
+
+function getActiveViewName() {
+  const active = document.querySelector('.view.active');
+  if (!active) return 'dashboard';
+  return active.id.replace('view-', '');
+}
+
 function fmtDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString();
@@ -175,6 +191,70 @@ function staffName(id) {
   const s = state.staff.find((x) => x.id === id);
   return s ? s.name : 'Unassigned';
 }
+
+function userName(id) {
+  if (!id) return '—';
+  const u = (state.users || []).find((x) => x.id === id);
+  return u ? u.name : '—';
+}
+
+function partyName(id) {
+  if (!id) return '—';
+  const staff = state.staff.find((x) => x.id === id);
+  if (staff) return staff.name;
+  return userName(id);
+}
+
+function assetTypeToTaskCategory(type) {
+  const map = {
+    laptop: 'hardware',
+    desktop: 'hardware',
+    monitor: 'hardware',
+    server: 'hardware',
+    network: 'network',
+    software: 'software',
+    other: 'other',
+  };
+  return map[type] || 'hardware';
+}
+
+function ensureUsersArray() {
+  if (!Array.isArray(state.users)) state.users = [];
+}
+
+function findUserByNameOrEmail(value) {
+  ensureUsersArray();
+  if (!value) return '';
+  const q = String(value).trim().toLowerCase();
+  const hit = state.users.find((u) =>
+    (u.name || '').toLowerCase() === q ||
+    (u.email || '').toLowerCase() === q
+  );
+  return hit?.id || '';
+}
+
+function findOrCreateDeviceUser(name) {
+  ensureUsersArray();
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return '';
+  const existing = findUserByNameOrEmail(trimmed);
+  if (existing) return existing;
+  const id = uid();
+  state.users.push({ id, name: trimmed, email: '', department: '' });
+  return id;
+}
+
+function wireTaskLinkedAssetCategory() {
+  const sel = document.querySelector('#modalBody [name="linkedAssetId"]');
+  const cat = document.querySelector('#modalBody [name="category"]');
+  if (!sel || !cat) return;
+  sel.addEventListener('change', () => {
+    if (!sel.value) return;
+    const asset = state.assets.find((a) => a.id === sel.value);
+    if (asset) cat.value = assetTypeToTaskCategory(asset.type);
+  });
+}
+
 
 function logAutomation(action, detail) {
   state.automationLog.unshift({
@@ -198,7 +278,10 @@ function logAssignment(itemType, itemId, itemLabel, action, from, to, notes) {
     to,
     notes: notes || '',
   });
-  if (to) notifyUser(to, action, itemLabel, itemType, itemId, notes);
+  // Only IT staff receive in-app notifications (device users do not log in)
+  if (to && state.staff.some((s) => s.id === to)) {
+    notifyUser(to, action, itemLabel, itemType, itemId, notes);
+  }
 }
 
 function notifyUser(userId, action, itemLabel, itemType, itemId, message) {
@@ -319,6 +402,7 @@ function repairAllStaffLogins(showToast = true) {
     } else {
       user.username = cred.username;
       user.passwordHash = hashPasswordSync(cred.password);
+      if (cred.username === 'admin') user.role = 'Administrator';
       changed = true;
     }
   }
@@ -678,7 +762,13 @@ function getCurrentUser() {
 
 function isAdmin() {
   const user = getCurrentUser();
-  return (user?.role || '').toLowerCase() === 'administrator';
+  if (!user) return false;
+  const role = (user.role || '').toLowerCase().trim();
+  const username = (user.username || '').toLowerCase().trim();
+  return username === 'admin'
+    || role === 'administrator'
+    || role === 'admin'
+    || role.includes('admin');
 }
 
 function unreadCount(userId) {
@@ -718,8 +808,11 @@ function saveResolutionDoc(task, data) {
   if (!task.resolvedAt) applyResolveTiming(task);
   const ttrMs = task.timeToResolveMs != null ? task.timeToResolveMs : calcTimeToResolve(task);
   const ttrLabel = formatDuration(ttrMs);
+  const attachments = Array.isArray(data.attachments)
+    ? data.attachments
+    : [...ensureTaskAttachments(task)];
   const entry = {
-    id: uid(),
+    id: task.resolutionDocId || uid(),
     taskId: task.id,
     taskTitle: task.title,
     category: task.category,
@@ -730,6 +823,7 @@ function saveResolutionDoc(task, data) {
     timeSpent: data.timeSpent || ttrLabel || '',
     timeToResolveMs: ttrMs,
     timeToResolveLabel: ttrLabel,
+    attachments,
     resolvedBy,
     resolvedAt: task.resolvedAt || new Date().toISOString(),
   };
@@ -738,6 +832,7 @@ function saveResolutionDoc(task, data) {
   task.resolutionDocId = entry.id;
   task.timeToResolveMs = ttrMs;
   task.timeToResolveLabel = ttrLabel;
+  task.attachments = attachments;
 
   const existing = state.documentation.findIndex((d) => d.taskId === task.id);
   if (existing >= 0) state.documentation[existing] = entry;
@@ -749,10 +844,31 @@ window.startTask = (id) => advanceTaskStatus(id, 'in-progress');
 window.resolveTask = function (id) {
   const task = state.tasks.find((t) => t.id === id);
   if (!task || task.status !== 'in-progress') return;
+  modalAttachments = [...ensureTaskAttachments(task)];
   openModal('Resolve Task — Document What Was Done', 'resolve', id, resolveFormFields(task));
+  setTimeout(wireTaskAttachments, 0);
 };
 
-window.closeTask = (id) => advanceTaskStatus(id, 'closed');
+window.closeTask = function (id) {
+  const task = state.tasks.find((t) => t.id === id);
+  if (!task || task.status !== 'resolved') return;
+  advanceTaskStatus(id, 'closed');
+};
+
+window.attachToTask = function (id) {
+  const task = state.tasks.find((t) => t.id === id);
+  if (!task) return;
+  if (task.status === 'closed') {
+    toast('Closed tasks are read-only — open Doc to view files');
+    return;
+  }
+  modalAttachments = [...ensureTaskAttachments(task)];
+  openModal(`Attachments — ${task.title}`, 'attach', id, `
+    <p class="hint">Add photos or documents for this task before it is closed. Files are kept with the task and resolution documentation.</p>
+    ${attachmentsMarkup(modalAttachments, { editable: true })}
+  `);
+  setTimeout(wireTaskAttachments, 0);
+};
 
 function resolveFormFields(task) {
   const elapsed = formatDuration(Date.now() - new Date(taskStartTime(task) || Date.now()).getTime());
@@ -771,10 +887,12 @@ function resolveFormFields(task) {
     <label>Time spent (manual note)
       <input name="timeSpent" value="${esc(elapsed)}" placeholder="e.g. 45 minutes" />
     </label>
+    ${attachmentsMarkup(modalAttachments, { editable: true })}
   `;
 }
 
 window.viewTaskDoc = function (taskId) {
+  document.getElementById('modal')?.close();
   const doc = state.documentation.find((d) => d.taskId === taskId);
   if (doc) viewDocumentation(doc.id);
   else toast('No documentation for this task yet');
@@ -794,6 +912,7 @@ window.viewDocumentation = function (docId) {
     ${doc.stepsTaken ? `<div class="doc-field"><strong>Steps taken</strong><div class="doc-resolution">${esc(doc.stepsTaken)}</div></div>` : ''}
     ${doc.partsUsed ? `<div class="doc-field"><strong>Parts / tools</strong>${esc(doc.partsUsed)}</div>` : ''}
     ${doc.timeSpent ? `<div class="doc-field"><strong>Time spent</strong>${esc(doc.timeSpent)}</div>` : ''}
+    ${(doc.attachments || []).length ? `<div class="doc-field"><strong>Attachments</strong>${attachmentsMarkup(doc.attachments, { editable: false })}</div>` : ''}
   `;
 
   document.querySelector('[data-view="documentation"]')?.click();
@@ -812,6 +931,10 @@ function workflowButtons(task) {
   }
   if (task.status === 'resolved') {
     btns.push(`<button class="btn btn-sm btn-secondary" onclick="closeTask('${task.id}')">Close</button>`);
+  }
+  if (['open', 'in-progress', 'resolved'].includes(task.status)) {
+    const n = ensureTaskAttachments(task).length;
+    btns.push(`<button class="btn btn-sm btn-ghost" onclick="attachToTask('${task.id}')">Attach${n ? ` (${n})` : ''}</button>`);
   }
   if (task.status === 'resolved' || task.status === 'closed') {
     if (task.resolutionDocId || task.resolutionNotes) {
@@ -843,7 +966,8 @@ document.querySelectorAll('.nav-btn').forEach((btn) => {
     const view = btn.dataset.view;
     document.getElementById('view-' + view).classList.add('active');
     document.getElementById('pageTitle').textContent = titles[view];
-    renderAll();
+    renderActiveView();
+    updateNotifBadges();
   });
 });
 
@@ -852,7 +976,7 @@ function renderDashboard() {
   const assets = state.assets;
   const tasks = state.tasks;
   const openTasks = tasks.filter((t) => !['resolved', 'closed'].includes(t.status));
-  const assigned = assets.filter((a) => a.assignee).length +
+  const assigned = assets.filter((a) => a.usedBy).length +
     tasks.filter((t) => t.assignee && !['resolved', 'closed'].includes(t.status)).length;
   const today = new Date().toISOString().slice(0, 10);
   const overdue = tasks.filter((t) => t.dueDate && t.dueDate < today && !['resolved', 'closed'].includes(t.status)).length +
@@ -950,10 +1074,14 @@ function renderAssets() {
   const typeF = document.getElementById('assetFilterType').value;
   const search = document.getElementById('globalSearch').value.toLowerCase();
 
+  ensureUsersArray();
   let list = state.assets.filter((a) => {
     if (statusF && a.status !== statusF) return false;
     if (typeF && a.type !== typeF) return false;
-    if (search && !`${a.tag} ${a.name} ${a.location}`.toLowerCase().includes(search)) return false;
+    if (search) {
+      const hay = `${a.tag} ${a.name} ${a.location} ${userName(a.usedBy)} ${staffName(a.assignee)}`.toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
     return true;
   });
 
@@ -969,7 +1097,8 @@ function renderAssets() {
       <td>${esc(a.name)}</td>
       <td>${esc(a.type)}</td>
       <td>${badge(a.status, a.status)}</td>
-      <td>${esc(staffName(a.assignee))}</td>
+      <td>${esc(userName(a.usedBy))}</td>
+      <td>${esc(a.assignee ? staffName(a.assignee) : '—')}</td>
       <td>${esc(a.location || '—')}</td>
       <td>${fmtDate(a.nextMaintenance)}</td>
       <td>
@@ -990,7 +1119,7 @@ function assetFormFields(a = {}, isNew = false) {
         <input name="tag" value="${esc(suggestedTag)}" required placeholder="${esc(generateAssetTag('laptop'))}" />
         ${isNew ? '<button type="button" class="btn btn-sm btn-secondary" id="generateTagBtn">Use next #</button>' : ''}
       </div>
-      ${isNew ? '<span class="hint-inline">From Settings → Asset Tag Numbering</span>' : ''}
+      ${isNew ? '<span class="hint-inline">From Settings → Asset Tag Numbering · <button type="button" class="btn btn-sm btn-ghost" onclick="goToTagSettings()">Edit numbering</button></span>' : ''}
     </label>
     <label>Name <input name="name" value="${esc(a.name || '')}" required placeholder="Dell Latitude 5540" /></label>
     <label>Type
@@ -1009,9 +1138,15 @@ function assetFormFields(a = {}, isNew = false) {
     </label>
     <label>Serial Number <input name="serial" value="${esc(a.serial || '')}" /></label>
     <label>Location <input name="location" value="${esc(a.location || '')}" placeholder="Building A, Floor 2" /></label>
-    <label>Assigned To
-      <select name="assignee">
+    <label>Used By <span class="hint-inline">(employee using this device)</span>
+      <select name="usedBy">
         <option value="">Unassigned</option>
+        ${(state.users || []).map((u) => `<option value="${u.id}" ${a.usedBy === u.id ? 'selected' : ''}>${esc(u.name)}${u.department ? ` (${esc(u.department)})` : ''}</option>`).join('')}
+      </select>
+    </label>
+    <label>IT Owner <span class="hint-inline">(optional — IT custodian)</span>
+      <select name="assignee">
+        <option value="">None</option>
         ${state.staff.map((s) => `<option value="${s.id}" ${a.assignee === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
       </select>
     </label>
@@ -1031,7 +1166,7 @@ document.getElementById('addAssetBtn').addEventListener('click', () => {
 });
 
 const ASSET_IMPORT_HEADERS = [
-  'Tag', 'Name', 'Type', 'Status', 'Serial', 'Location', 'Assigned To', 'Next Maintenance', 'Notes',
+  'Tag', 'Name', 'Type', 'Status', 'Serial', 'Location', 'Used By', 'IT Owner', 'Next Maintenance', 'Notes',
 ];
 
 const ASSET_TYPE_ALIASES = {
@@ -1111,6 +1246,16 @@ function mapAssetImportRow(row) {
   const name = get('Name', 'Asset Name', 'Description', 'Model');
   if (!tag && !name) return null;
 
+  const usedByRaw = get('Used By', 'Device User', 'Employee', 'End User');
+  const itOwnerRaw = get('IT Owner', 'Custodian', 'Technician');
+  const legacyAssigned = get('Assigned To', 'Assignee', 'Owner', 'User');
+  const usedBy = usedByRaw
+    ? findOrCreateDeviceUser(usedByRaw)
+    : (legacyAssigned && !findStaffByNameOrEmail(legacyAssigned) ? findOrCreateDeviceUser(legacyAssigned) : '');
+  const assignee = findStaffByNameOrEmail(itOwnerRaw)
+    || findStaffByNameOrEmail(legacyAssigned)
+    || '';
+
   return {
     tag: tag || generateAssetTag(ASSET_TYPE_ALIASES[typeKey] || 'other'),
     name: name || tag || 'Imported Asset',
@@ -1118,7 +1263,8 @@ function mapAssetImportRow(row) {
     status: ASSET_STATUS_ALIASES[statusKey] || 'active',
     serial: get('Serial', 'Serial Number', 'S/N', 'SN'),
     location: get('Location', 'Site', 'Office'),
-    assignee: findStaffByNameOrEmail(get('Assigned To', 'Assignee', 'User', 'Owner')),
+    usedBy,
+    assignee,
     nextMaintenance: excelDateToISO(get('Next Maintenance', 'Maintenance Date', 'Next Service')),
     notes: get('Notes', 'Comment', 'Comments', 'Remark'),
   };
@@ -1143,7 +1289,8 @@ function downloadAssetTemplate() {
     Status: 'active',
     Serial: 'ABC123',
     Location: 'HQ Floor 2',
-    'Assigned To': 'John Smith',
+    'Used By': 'Jane Employee',
+    'IT Owner': 'John Smith',
     'Next Maintenance': todayISO(),
     Notes: 'Sample row — replace with your data',
   }], 'mit-asset-template.xlsx');
@@ -1158,13 +1305,14 @@ function exportAssetsToExcel() {
     Status: a.status || '',
     Serial: a.serial || '',
     Location: a.location || '',
-    'Assigned To': staffName(a.assignee) === 'Unassigned' ? '' : staffName(a.assignee),
+    'Used By': userName(a.usedBy) === '—' ? '' : userName(a.usedBy),
+    'IT Owner': staffName(a.assignee) === 'Unassigned' ? '' : staffName(a.assignee),
     'Next Maintenance': a.nextMaintenance || '',
     Notes: a.notes || '',
   }));
   downloadAssetWorkbook(rows.length ? rows : [{
     Tag: '', Name: '', Type: '', Status: '', Serial: '', Location: '',
-    'Assigned To': '', 'Next Maintenance': '', Notes: '',
+    'Used By': '', 'IT Owner': '', 'Next Maintenance': '', Notes: '',
   }], `mit-assets-export-${Date.now()}.xlsx`);
   toast(`Exported ${state.assets.length} asset(s)`);
 }
@@ -1201,6 +1349,7 @@ async function importAssetsFromFile(file) {
         status: mapped.status || existing.status,
         serial: mapped.serial || existing.serial,
         location: mapped.location || existing.location,
+        usedBy: mapped.usedBy || existing.usedBy,
         assignee: mapped.assignee || existing.assignee,
         nextMaintenance: mapped.nextMaintenance || existing.nextMaintenance,
         notes: mapped.notes || existing.notes,
@@ -1314,7 +1463,7 @@ function renderTasks() {
     return `
     <tr>
       <td><code>${esc(t.id.slice(-6).toUpperCase())}</code></td>
-      <td>${esc(t.title)}</td>
+      <td>${taskTitleWithHover(t)}</td>
       <td>${esc(t.category)}</td>
       <td>${badge(t.priority, t.priority)}</td>
       <td>${badge(t.status, t.status)}</td>
@@ -1331,10 +1480,176 @@ function renderTasks() {
   }).join('');
 }
 
+function taskPreviewPayload(t) {
+  const doc = (state.documentation || []).find((d) => d.id === t.resolutionDocId);
+  const description = (t.description || '').trim() || 'No description provided.';
+  const done = (doc?.whatWasDone || t.resolutionNotes || '').trim();
+  const n = (doc?.attachments || t.attachments || []).length;
+  const sections = [
+    { heading: 'Description', body: description },
+  ];
+  if (done || ['resolved', 'closed'].includes(t.status)) {
+    sections.push({
+      heading: 'What was done',
+      body: done || 'No resolution notes recorded yet.',
+    });
+  }
+  if (n) {
+    sections.push({ heading: 'Attachments', body: `${n} file(s) attached` });
+  }
+  return sections;
+}
+
+function taskTitleWithHover(t) {
+  return `<span class="task-title-hover" data-task-preview="${t.id}" tabindex="0" title="Hover for preview · click for details">${esc(t.title)}</span>`;
+}
+
+function ensureTaskHoverCard() {
+  let card = document.getElementById('taskHoverCard');
+  if (card) return card;
+  card = document.createElement('div');
+  card.id = 'taskHoverCard';
+  card.className = 'task-hover-card';
+  card.hidden = true;
+  card.setAttribute('role', 'tooltip');
+  document.body.appendChild(card);
+  return card;
+}
+
+function positionTaskHoverCard(card, anchor) {
+  const pad = 10;
+  const rect = anchor.getBoundingClientRect();
+  card.hidden = false;
+  const cardRect = card.getBoundingClientRect();
+  let left = rect.left;
+  let top = rect.bottom + 8;
+  if (left + cardRect.width > window.innerWidth - pad) {
+    left = Math.max(pad, window.innerWidth - cardRect.width - pad);
+  }
+  if (top + cardRect.height > window.innerHeight - pad) {
+    top = Math.max(pad, rect.top - cardRect.height - 8);
+  }
+  card.style.left = `${Math.max(pad, left)}px`;
+  card.style.top = `${top}px`;
+}
+
+function showTaskHoverCard(taskId, anchor) {
+  const t = state.tasks.find((x) => x.id === taskId);
+  if (!t || !anchor) return;
+  const sections = taskPreviewPayload(t);
+  const card = ensureTaskHoverCard();
+  card.innerHTML = `
+    <div class="task-hover-title">${esc(t.title)}</div>
+    <div class="task-hover-status">${badge(t.status, t.status)} · ${badge(t.priority, t.priority)}</div>
+    ${sections.map((s) => `
+      <div class="task-hover-heading">${esc(s.heading)}</div>
+      <div class="task-hover-body">${esc(s.body)}</div>
+    `).join('')}
+    <div class="task-hover-hint">Click title for full details</div>
+  `;
+  positionTaskHoverCard(card, anchor);
+}
+
+function hideTaskHoverCard() {
+  const card = document.getElementById('taskHoverCard');
+  if (card) card.hidden = true;
+}
+
+function taskDetailMarkup(t) {
+  const doc = (state.documentation || []).find((d) => d.id === t.resolutionDocId);
+  const description = (t.description || '').trim() || 'No description provided.';
+  const done = (doc?.whatWasDone || t.resolutionNotes || '').trim();
+  const attachments = doc?.attachments || t.attachments || [];
+  const ttr = ['resolved', 'closed'].includes(t.status)
+    ? (t.timeToResolveLabel || timeToResolveLabel(t) || '—')
+    : formatDuration(Date.now() - new Date(taskStartTime(t) || Date.now()).getTime());
+
+  return `
+    <div class="task-detail">
+      <div class="task-detail-row"><strong>Status</strong>${badge(t.status, t.status)} · ${badge(t.priority, t.priority)} · ${esc(t.category || '—')}</div>
+      <div class="task-detail-row"><strong>Assigned</strong>${esc(staffName(t.assignee))}</div>
+      <div class="task-detail-row"><strong>Due</strong>${fmtDate(t.dueDate)} · <strong>Age / TTR</strong> ${esc(ttr)}</div>
+      <div class="task-detail-block">
+        <strong>Description (what)</strong>
+        <div class="doc-resolution">${esc(description)}</div>
+      </div>
+      <div class="task-detail-block">
+        <strong>What was done</strong>
+        <div class="doc-resolution">${esc(done || (['resolved', 'closed'].includes(t.status) ? 'No resolution notes recorded yet.' : 'Not resolved yet — notes appear after Resolve.'))}</div>
+      </div>
+      ${doc?.stepsTaken ? `<div class="task-detail-block"><strong>Steps taken</strong><div class="doc-resolution">${esc(doc.stepsTaken)}</div></div>` : ''}
+      ${doc?.partsUsed ? `<div class="task-detail-row"><strong>Parts / tools</strong>${esc(doc.partsUsed)}</div>` : ''}
+      ${attachments.length ? `<div class="task-detail-block"><strong>Attachments</strong>${attachmentsMarkup(attachments, { editable: false })}</div>` : ''}
+      <div class="workflow-btns" style="margin-top:0.75rem">
+        <button type="button" class="btn btn-secondary" onclick="editTask('${t.id}')">Edit Task</button>
+        ${t.resolutionDocId || t.resolutionNotes ? `<button type="button" class="btn btn-ghost" onclick="viewTaskDoc('${t.id}')">Open Documentation</button>` : ''}
+        ${['open', 'in-progress', 'resolved'].includes(t.status) ? `<button type="button" class="btn btn-ghost" onclick="attachToTask('${t.id}')">Attachments</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+window.viewTaskDetails = function (id) {
+  const t = state.tasks.find((x) => x.id === id);
+  if (!t) return;
+  hideTaskHoverCard();
+  openModal(`Task — ${t.title}`, 'task-detail', id, taskDetailMarkup(t));
+};
+
+let taskHoverHideTimer = null;
+function bindTaskHoverPreview() {
+  if (document.body.dataset.taskHoverBound === '1') return;
+  document.body.dataset.taskHoverBound = '1';
+
+  document.addEventListener('mouseover', (e) => {
+    const anchor = e.target.closest('[data-task-preview]');
+    if (!anchor) return;
+    clearTimeout(taskHoverHideTimer);
+    showTaskHoverCard(anchor.dataset.taskPreview, anchor);
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    const from = e.target.closest('[data-task-preview]');
+    if (!from) return;
+    const to = e.relatedTarget?.closest?.('[data-task-preview], #taskHoverCard');
+    if (to) return;
+    taskHoverHideTimer = setTimeout(hideTaskHoverCard, 120);
+  });
+
+  document.addEventListener('focusin', (e) => {
+    const anchor = e.target.closest('[data-task-preview]');
+    if (anchor) showTaskHoverCard(anchor.dataset.taskPreview, anchor);
+  });
+
+  document.addEventListener('focusout', (e) => {
+    if (!e.target.closest('[data-task-preview]')) return;
+    taskHoverHideTimer = setTimeout(hideTaskHoverCard, 120);
+  });
+
+  document.addEventListener('click', (e) => {
+    const anchor = e.target.closest('[data-task-preview]');
+    if (!anchor) return;
+    e.preventDefault();
+    e.stopPropagation();
+    viewTaskDetails(anchor.dataset.taskPreview);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const anchor = e.target.closest('[data-task-preview]');
+    if (!anchor) return;
+    e.preventDefault();
+    viewTaskDetails(anchor.dataset.taskPreview);
+  });
+
+  document.addEventListener('scroll', hideTaskHoverCard, true);
+  window.addEventListener('resize', hideTaskHoverCard);
+}
+
 function taskFormFields(t = {}) {
   return `
     <label>Title <input name="title" value="${esc(t.title || '')}" required /></label>
-    <label>Category
+    <label>Category <span class="hint-inline">(auto-fills when you pick a linked asset)</span>
       <select name="category">
         ${['hardware','software','network','security','onboarding','maintenance','other'].map((c) =>
           `<option value="${c}" ${t.category === c ? 'selected' : ''}>${c}</option>`
@@ -1374,16 +1689,27 @@ function taskFormFields(t = {}) {
     <label>Resolution notes <span class="hint-inline">(saved to Documentation when status is Resolved)</span>
       <textarea name="resolutionNotes" placeholder="What was done to fix this issue…">${esc(t.resolutionNotes || '')}</textarea>
     </label>
+    ${attachmentsMarkup(modalAttachments, { editable: t.status !== 'closed' })}
   `;
 }
 
 window.editTask = function (id) {
   const t = state.tasks.find((x) => x.id === id);
+  modalAttachments = [...ensureTaskAttachments(t)];
   openModal('Edit Task', 'task', id, taskFormFields(t));
+  setTimeout(() => {
+    wireTaskLinkedAssetCategory();
+    wireTaskAttachments();
+  }, 0);
 };
 
 document.getElementById('addTaskBtn').addEventListener('click', () => {
+  modalAttachments = [];
   openModal('Log Task', 'task', null, taskFormFields());
+  setTimeout(() => {
+    wireTaskLinkedAssetCategory();
+    wireTaskAttachments();
+  }, 0);
 });
 
 document.getElementById('quickTaskBtn').addEventListener('click', () => {
@@ -1393,9 +1719,19 @@ document.getElementById('quickTaskBtn').addEventListener('click', () => {
 
 /* ── Assignments ── */
 function populateAssignSelects() {
+  ensureUsersArray();
   const type = document.querySelector('#assignForm [name="itemType"]')?.value || 'asset';
   const itemSel = document.getElementById('assignItemSelect');
   const reassignSel = document.getElementById('reassignItemSelect');
+  const assignLabel = document.getElementById('assignToLabel');
+
+  if (assignLabel) {
+    const select = assignLabel.querySelector('select');
+    assignLabel.replaceChildren(
+      document.createTextNode(type === 'asset' ? 'Assign To (Device User)' : 'Assign To (IT Staff)'),
+      select || Object.assign(document.createElement('select'), { id: 'assigneeSelect', name: 'assignee', required: true })
+    );
+  }
 
   if (itemSel) {
     const items = type === 'asset' ? state.assets : state.tasks.filter((t) => !['closed'].includes(t.status));
@@ -1406,20 +1742,49 @@ function populateAssignSelects() {
   }
 
   const staffOpts = state.staff.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-  document.getElementById('assigneeSelect').innerHTML = staffOpts;
-  document.getElementById('reassignAssigneeSelect').innerHTML = staffOpts;
+  const userOpts = (state.users || []).map((u) =>
+    `<option value="${u.id}">${esc(u.name)}${u.department ? ` — ${esc(u.department)}` : ''}</option>`
+  ).join('');
+
+  const assigneeSelect = document.getElementById('assigneeSelect');
+  if (assigneeSelect) {
+    if (type === 'asset') {
+      assigneeSelect.innerHTML = userOpts || '<option value="">Add device users in Storage first</option>';
+    } else {
+      assigneeSelect.innerHTML = staffOpts || '<option value="">No IT staff</option>';
+    }
+  }
 
   if (reassignSel) {
     const assigned = [];
-    state.assets.filter((a) => a.assignee).forEach((a) => {
-      assigned.push({ key: `asset:${a.id}`, label: `Asset: ${a.tag} → ${staffName(a.assignee)}`, assignee: a.assignee });
+    state.assets.filter((a) => a.usedBy).forEach((a) => {
+      assigned.push({ key: `asset:${a.id}`, label: `Asset: ${a.tag} → ${userName(a.usedBy)}`, party: a.usedBy });
     });
     state.tasks.filter((t) => t.assignee && !['closed'].includes(t.status)).forEach((t) => {
-      assigned.push({ key: `task:${t.id}`, label: `Task: ${t.title} → ${staffName(t.assignee)}`, assignee: t.assignee });
+      assigned.push({ key: `task:${t.id}`, label: `Task: ${t.title} → ${staffName(t.assignee)}`, party: t.assignee });
     });
     reassignSel.innerHTML = assigned.map((a) =>
-      `<option value="${a.key}">${esc(a.label)}</option>`
+      `<option value="${a.key}" data-party="${a.party}">${esc(a.label)}</option>`
     ).join('') || '<option value="">Nothing assigned yet</option>';
+  }
+
+  syncReassignAssigneeOptions();
+}
+
+function syncReassignAssigneeOptions() {
+  const reassignSel = document.getElementById('reassignItemSelect');
+  const target = document.getElementById('reassignAssigneeSelect');
+  if (!reassignSel || !target) return;
+  const key = reassignSel.value || '';
+  const type = key.split(':')[0];
+  if (type === 'asset') {
+    target.innerHTML = (state.users || []).map((u) =>
+      `<option value="${u.id}">${esc(u.name)}</option>`
+    ).join('') || '<option value="">Add device users in Storage first</option>';
+  } else {
+    target.innerHTML = state.staff.map((s) =>
+      `<option value="${s.id}">${esc(s.name)}</option>`
+    ).join('') || '<option value="">No IT staff</option>';
   }
 }
 
@@ -1434,17 +1799,19 @@ function renderAssignmentHistory() {
       <td>${fmtDate(h.date)}</td>
       <td>${esc(h.itemLabel)}</td>
       <td>${esc(h.action)}</td>
-      <td>${esc(staffName(h.from) || '—')}</td>
-      <td>${esc(staffName(h.to))}</td>
+      <td>${esc(partyName(h.from))}</td>
+      <td>${esc(partyName(h.to))}</td>
       <td>${esc(h.notes || '—')}</td>
     </tr>
   `).join('');
 }
 
 document.querySelector('#assignForm [name="itemType"]')?.addEventListener('change', populateAssignSelects);
+document.getElementById('reassignItemSelect')?.addEventListener('change', syncReassignAssigneeOptions);
 
 document.getElementById('assignForm').addEventListener('submit', (e) => {
   e.preventDefault();
+  ensureUsersArray();
   const fd = new FormData(e.target);
   const itemType = fd.get('itemType');
   const itemId = fd.get('itemId');
@@ -1454,9 +1821,13 @@ document.getElementById('assignForm').addEventListener('submit', (e) => {
   if (itemType === 'asset') {
     const asset = state.assets.find((a) => a.id === itemId);
     if (!asset) return;
-    const prev = asset.assignee;
-    asset.assignee = assignee;
-    logAssignment('asset', itemId, `${asset.tag} — ${asset.name}`, 'Assigned', prev, assignee, notes);
+    if (!assignee) {
+      toast('Add a device user in Storage → Device Users first');
+      return;
+    }
+    const prev = asset.usedBy;
+    asset.usedBy = assignee;
+    logAssignment('asset', itemId, `${asset.tag} — ${asset.name}`, 'Assigned to user', prev, assignee, notes);
   } else {
     const task = state.tasks.find((t) => t.id === itemId);
     if (!task) return;
@@ -1486,9 +1857,9 @@ document.getElementById('reassignForm').addEventListener('submit', (e) => {
   if (type === 'asset') {
     const asset = state.assets.find((a) => a.id === id);
     if (!asset) return;
-    const prev = asset.assignee;
-    asset.assignee = newAssignee;
-    logAssignment('asset', id, `${asset.tag} — ${asset.name}`, 'Reassigned', prev, newAssignee, notes);
+    const prev = asset.usedBy;
+    asset.usedBy = newAssignee;
+    logAssignment('asset', id, `${asset.tag} — ${asset.name}`, 'Reassigned to user', prev, newAssignee, notes);
   } else {
     const task = state.tasks.find((t) => t.id === id);
     if (!task) return;
@@ -1550,9 +1921,9 @@ function buildReport(type, from, to) {
   if (type === 'assets' || type === 'full') {
     title = type === 'full' ? 'Full IT Operations Report' : 'Asset Inventory Report';
     const assets = state.assets;
-    rows = [['Tag', 'Name', 'Type', 'Status', 'Assigned To', 'Location', 'Next Maintenance']];
+    rows = [['Tag', 'Name', 'Type', 'Status', 'Used By', 'IT Owner', 'Location', 'Next Maintenance']];
     assets.forEach((a) => {
-      rows.push([a.tag, a.name, a.type, a.status, staffName(a.assignee), a.location || '', a.nextMaintenance || '']);
+      rows.push([a.tag, a.name, a.type, a.status, userName(a.usedBy), a.assignee ? staffName(a.assignee) : '', a.location || '', a.nextMaintenance || '']);
     });
     html += `<h3>Assets (${assets.length})</h3>`;
     html += tableFromRows(rows);
@@ -1575,7 +1946,7 @@ function buildReport(type, from, to) {
     const hist = state.assignmentHistory.filter((h) => inRange(h.date));
     const histRows = [['Date', 'Item', 'Action', 'From', 'To', 'Notes']];
     hist.forEach((h) => {
-      histRows.push([fmtDate(h.date), h.itemLabel, h.action, staffName(h.from) || '—', staffName(h.to), h.notes]);
+      histRows.push([fmtDate(h.date), h.itemLabel, h.action, partyName(h.from), partyName(h.to), h.notes]);
     });
     html += `<h3>Assignments (${hist.length})</h3>`;
     html += tableFromRows(histRows);
@@ -1585,9 +1956,9 @@ function buildReport(type, from, to) {
   if (type === 'maintenance') {
     title = 'Maintenance Schedule';
     const items = state.assets.filter((a) => a.nextMaintenance).sort((a, b) => a.nextMaintenance.localeCompare(b.nextMaintenance));
-    rows = [['Tag', 'Name', 'Status', 'Next Maintenance', 'Assigned To']];
+    rows = [['Tag', 'Name', 'Status', 'Next Maintenance', 'Used By', 'IT Owner']];
     items.forEach((a) => {
-      rows.push([a.tag, a.name, a.status, a.nextMaintenance, staffName(a.assignee)]);
+      rows.push([a.tag, a.name, a.status, a.nextMaintenance, userName(a.usedBy), a.assignee ? staffName(a.assignee) : '']);
     });
     html = `<div class="report-meta">Generated: ${now} · ${esc(state.settings.appName)}</div><h3>Maintenance Schedule (${items.length})</h3>` + tableFromRows(rows);
   }
@@ -1766,11 +2137,19 @@ function seedDemoData() {
   if (state.assets.length && !confirm('Add demo data anyway?')) return;
 
   const staff = state.staff;
+  ensureUsersArray();
+  const userJane = uid();
+  const userMark = uid();
+  state.users.push(
+    { id: userJane, name: 'Jane Employee', email: 'jane@company.com', department: 'Finance' },
+    { id: userMark, name: 'Mark Rivera', email: 'mark@company.com', department: 'Operations' },
+  );
+
   const serverId = uid();
   state.assets.push(
-    { id: uid(), tag: 'IT-LP-001', name: 'Dell Latitude 5540', type: 'laptop', status: 'active', serial: 'DL5540-001', location: 'HQ Floor 2', assignee: staff[1]?.id, nextMaintenance: addDays(30), notes: '', created: new Date().toISOString() },
-    { id: uid(), tag: 'IT-MN-012', name: 'LG 27" Monitor', type: 'monitor', status: 'active', serial: 'LG27-012', location: 'HQ Floor 2', assignee: staff[1]?.id, nextMaintenance: addDays(90), notes: '', created: new Date().toISOString() },
-    { id: serverId, tag: 'IT-SV-003', name: 'Dell PowerEdge R740', type: 'server', status: 'maintenance', serial: 'PE740-003', location: 'Server Room', assignee: staff[0]?.id, nextMaintenance: addDays(-2), notes: 'RAM upgrade pending', created: new Date().toISOString() },
+    { id: uid(), tag: 'IT-LP-001', name: 'Dell Latitude 5540', type: 'laptop', status: 'active', serial: 'DL5540-001', location: 'HQ Floor 2', usedBy: userJane, assignee: staff[1]?.id, nextMaintenance: addDays(30), notes: '', created: new Date().toISOString() },
+    { id: uid(), tag: 'IT-MN-012', name: 'LG 27" Monitor', type: 'monitor', status: 'active', serial: 'LG27-012', location: 'HQ Floor 2', usedBy: userJane, assignee: staff[1]?.id, nextMaintenance: addDays(90), notes: '', created: new Date().toISOString() },
+    { id: serverId, tag: 'IT-SV-003', name: 'Dell PowerEdge R740', type: 'server', status: 'maintenance', serial: 'PE740-003', location: 'Server Room', usedBy: '', assignee: staff[0]?.id, nextMaintenance: addDays(-2), notes: 'RAM upgrade pending', created: new Date().toISOString() },
   );
 
   const resolvedTaskId = uid();
@@ -1824,7 +2203,8 @@ function renderStorage() {
   document.getElementById('storageStats').innerHTML = `
     <div class="storage-stat"><span>Assets</span><strong>${state.assets.length}</strong></div>
     <div class="storage-stat"><span>Tasks</span><strong>${state.tasks.length}</strong></div>
-    <div class="storage-stat"><span>Staff</span><strong>${state.staff.length}</strong></div>
+    <div class="storage-stat"><span>IT Staff</span><strong>${state.staff.length}</strong></div>
+    <div class="storage-stat"><span>Device Users</span><strong>${(state.users || []).length}</strong></div>
     <div class="storage-stat"><span>Assignment records</span><strong>${state.assignmentHistory.length}</strong></div>
     <div class="storage-stat"><span>Documentation entries</span><strong>${state.documentation.length}</strong></div>
     <div class="storage-stat"><span>Storage used</span><strong>${sizeKB} KB</strong></div>
@@ -1859,6 +2239,25 @@ function renderStorage() {
       ${actions}
     </div>`;
   }).join('');
+
+  ensureUsersArray();
+  const deviceUserList = document.getElementById('deviceUserList');
+  if (deviceUserList) {
+    deviceUserList.innerHTML = state.users.length
+      ? state.users.map((u) => {
+        const held = state.assets.filter((a) => a.usedBy === u.id).length;
+        return `
+        <div class="staff-card">
+          <div>
+            <strong>${esc(u.name)}</strong>
+            <div class="meta">${esc(u.department || 'No department')} · ${esc(u.email || 'No email')} · ${held} device(s)</div>
+          </div>
+          <button class="btn btn-sm btn-danger" onclick="removeDeviceUser('${u.id}')">Remove</button>
+        </div>`;
+      }).join('')
+      : '<div class="empty-state">No device users yet — add employees who use equipment</div>';
+  }
+
   renderCloudPanel();
 }
 
@@ -1964,6 +2363,39 @@ document.getElementById('staffForm').addEventListener('submit', async (e) => {
   toast(`Added ${fd.get('name')} — login: ${username} / ${defaultPw} (must change password)`);
 });
 
+document.getElementById('deviceUserForm')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  ensureUsersArray();
+  const fd = new FormData(e.target);
+  const name = String(fd.get('name') || '').trim();
+  if (!name) return;
+  if (findUserByNameOrEmail(name) || findUserByNameOrEmail(fd.get('email'))) {
+    toast('That device user already exists');
+    return;
+  }
+  state.users.push({
+    id: uid(),
+    name,
+    email: String(fd.get('email') || '').trim(),
+    department: String(fd.get('department') || '').trim(),
+  });
+  saveState();
+  e.target.reset();
+  renderAll();
+  toast(`Device user ${name} added`);
+});
+
+window.removeDeviceUser = function (id) {
+  ensureUsersArray();
+  const held = state.assets.filter((a) => a.usedBy === id);
+  if (held.length && !confirm(`${held.length} asset(s) are assigned to this user. Unassign and remove?`)) return;
+  held.forEach((a) => { a.usedBy = ''; });
+  state.users = state.users.filter((u) => u.id !== id);
+  saveState();
+  renderAll();
+  toast('Device user removed');
+};
+
 document.getElementById('exportBtn').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -1991,6 +2423,7 @@ document.getElementById('importFile').addEventListener('change', (e) => {
       state = {
         ...defaults,
         ...imported,
+        users: Array.isArray(imported.users) ? imported.users : [],
         settings: { ...defaults.settings, ...(imported.settings || {}) },
         automationRules: { ...defaults.automationRules, ...(imported.automationRules || {}) },
       };
@@ -2026,6 +2459,13 @@ function openModal(title, mode, id, bodyHtml) {
   editId = id;
   document.getElementById('modalTitle').textContent = title;
   document.getElementById('modalBody').innerHTML = bodyHtml;
+  const submit = document.getElementById('modalSubmit');
+  if (submit) {
+    submit.textContent = mode === 'resolve' ? 'Resolve & Save'
+      : mode === 'attach' ? 'Save Attachments'
+      : mode === 'qr' || mode === 'task-detail' ? 'Close'
+      : 'Save';
+  }
   document.getElementById('modal').showModal();
 }
 
@@ -2042,21 +2482,29 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
     if (editId) {
       const a = state.assets.find((x) => x.id === editId);
       const prevStatus = a.status;
+      const prevUsedBy = a.usedBy;
       const prevAssignee = a.assignee;
       Object.assign(a, data);
       handleMaintenanceComplete(a, prevStatus);
-      if (data.assignee && data.assignee !== prevAssignee) {
-        logAssignment('asset', editId, `${a.tag} — ${a.name}`, 'Assigned via edit', prevAssignee, data.assignee, '');
+      if ((data.usedBy || '') !== (prevUsedBy || '')) {
+        logAssignment('asset', editId, `${a.tag} — ${a.name}`, 'Assigned to user via edit', prevUsedBy, data.usedBy, '');
+      }
+      if ((data.assignee || '') !== (prevAssignee || '') && data.assignee) {
+        logAssignment('asset', editId, `${a.tag} — ${a.name}`, 'IT owner updated', prevAssignee, data.assignee, '');
       }
     } else {
       state.assets.push({ id: uid(), ...data, created: new Date().toISOString() });
       bumpTagCounter(data.tag);
+      if (data.usedBy) {
+        logAssignment('asset', state.assets[state.assets.length - 1].id, `${data.tag} — ${data.name}`, 'Assigned to user', '', data.usedBy, '');
+      }
     }
   } else if (modalMode === 'task') {
     if (editId) {
       const t = state.tasks.find((x) => x.id === editId);
       const prevStatus = t.status;
       Object.assign(t, data);
+      commitModalAttachments(t);
       if (data.status === 'in-progress' && prevStatus === 'open') t.startedAt = new Date().toISOString();
       if (data.status === 'resolved' && prevStatus !== 'resolved') {
         applyResolveTiming(t);
@@ -2066,6 +2514,7 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
             stepsTaken: '',
             partsUsed: '',
             timeSpent: '',
+            attachments: t.attachments,
           });
         }
       }
@@ -2074,8 +2523,14 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
         t.status = 'in-progress';
         t.startedAt = new Date().toISOString();
       }
+      // Keep documentation attachments in sync when editing a resolved/closed task
+      if (t.resolutionDocId) {
+        const doc = state.documentation.find((d) => d.id === t.resolutionDocId);
+        if (doc) doc.attachments = [...ensureTaskAttachments(t)];
+      }
     } else {
-      const newTask = { id: uid(), ...data, created: new Date().toISOString() };
+      const newTask = { id: uid(), ...data, created: new Date().toISOString(), attachments: [] };
+      commitModalAttachments(newTask);
       if (state.automationRules.autoStartOnAssign && newTask.assignee && (!newTask.status || newTask.status === 'open')) {
         newTask.status = 'in-progress';
         newTask.startedAt = new Date().toISOString();
@@ -2085,8 +2540,21 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
         notifyUser(newTask.assignee, 'Assigned', newTask.title, 'task', newTask.id, '');
       }
     }
-  } else if (modalMode === 'qr') {
+  } else if (modalMode === 'qr' || modalMode === 'task-detail') {
     document.getElementById('modal').close();
+    return;
+  } else if (modalMode === 'attach') {
+    const task = state.tasks.find((x) => x.id === editId);
+    if (!task) return;
+    commitModalAttachments(task);
+    if (task.resolutionDocId) {
+      const doc = state.documentation.find((d) => d.id === task.resolutionDocId);
+      if (doc) doc.attachments = [...ensureTaskAttachments(task)];
+    }
+    document.getElementById('modal').close();
+    saveState();
+    renderAll();
+    toast(modalAttachments.length ? `${modalAttachments.length} attachment(s) saved` : 'Attachments updated');
     return;
   } else if (modalMode === 'resolve') {
     const task = state.tasks.find((x) => x.id === editId);
@@ -2098,7 +2566,8 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
     const prev = task.status;
     task.status = 'resolved';
     applyResolveTiming(task);
-    saveResolutionDoc(task, data);
+    commitModalAttachments(task);
+    saveResolutionDoc(task, { ...data, attachments: task.attachments });
     logAutomation('Status Change', `${task.title}: ${prev} → resolved (${task.timeToResolveLabel})`);
     document.getElementById('modal').close();
     saveState();
@@ -2138,7 +2607,16 @@ document.getElementById('taskDateAllBtn')?.addEventListener('click', () => {
 
 document.getElementById('printDailyBtn')?.addEventListener('click', printDailySheet);
 
-document.getElementById('globalSearch').addEventListener('input', renderAll);
+const runGlobalSearch = debounce(() => {
+  const view = getActiveViewName();
+  // Only the searchable views need re-rendering as the query changes
+  if (view === 'assets') renderAssets();
+  else if (view === 'tasks') renderTasks();
+  else if (view === 'documentation') renderDocumentation();
+  else renderActiveView();
+}, 160);
+
+document.getElementById('globalSearch').addEventListener('input', runGlobalSearch);
 
 /* ── Utils ── */
 function esc(s) {
@@ -2173,7 +2651,7 @@ function renderMyWork() {
         : formatDuration(Date.now() - new Date(taskStartTime(t) || Date.now()).getTime());
       return `
       <tr>
-        <td>${esc(t.title)}</td>
+        <td>${taskTitleWithHover(t)}</td>
         <td>${badge(t.priority, t.priority)}</td>
         <td>${badge(t.status, t.status)}</td>
         <td>${fmtDate(t.dueDate)}</td>
@@ -2301,6 +2779,166 @@ function readFileAsDataURL(file) {
   });
 }
 
+const ATTACH_MAX_FILES = 6;
+const ATTACH_MAX_BYTES = 2.5 * 1024 * 1024; // 2.5 MB per file (after compress for images)
+const ATTACH_ACCEPT = 'image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.csv';
+
+let modalAttachments = [];
+
+function ensureTaskAttachments(task) {
+  if (!task) return [];
+  if (!Array.isArray(task.attachments)) task.attachments = [];
+  return task.attachments;
+}
+
+function formatFileSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageType(type, name = '') {
+  if ((type || '').startsWith('image/')) return true;
+  return /\.(jpe?g|png|gif|webp|bmp)$/i.test(name);
+}
+
+async function compressImageFile(file, maxEdge = 1280, quality = 0.82) {
+  const dataUrl = await readFileAsDataURL(file);
+  const img = await loadImage(dataUrl);
+  const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale));
+  const h = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, w, h);
+  const outType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+  return canvas.toDataURL(outType, outType === 'image/png' ? undefined : quality);
+}
+
+function dataUrlByteSize(dataUrl) {
+  const base64 = String(dataUrl || '').split(',')[1] || '';
+  return Math.ceil((base64.length * 3) / 4);
+}
+
+async function fileToAttachment(file) {
+  if (!file) return null;
+  let dataUrl;
+  let type = file.type || 'application/octet-stream';
+  let name = file.name || 'attachment';
+
+  if (isImageType(type, name)) {
+    dataUrl = await compressImageFile(file);
+    type = dataUrl.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
+    if (!/\.(jpe?g|png|gif|webp)$/i.test(name)) {
+      name = `${name.replace(/\.[^.]+$/, '') || 'photo'}.${type === 'image/png' ? 'png' : 'jpg'}`;
+    }
+  } else {
+    if (file.size > ATTACH_MAX_BYTES) {
+      throw new Error(`"${name}" is too large (max ${formatFileSize(ATTACH_MAX_BYTES)})`);
+    }
+    dataUrl = await readFileAsDataURL(file);
+  }
+
+  const size = dataUrlByteSize(dataUrl);
+  if (size > ATTACH_MAX_BYTES) {
+    throw new Error(`"${name}" is still too large after compress (max ${formatFileSize(ATTACH_MAX_BYTES)})`);
+  }
+
+  return {
+    id: uid(),
+    name,
+    type,
+    size,
+    dataUrl,
+    addedAt: new Date().toISOString(),
+  };
+}
+
+function attachmentsMarkup(list, { editable = true } = {}) {
+  const items = Array.isArray(list) ? list : [];
+  const chips = items.length
+    ? items.map((a) => {
+      const isImg = isImageType(a.type, a.name);
+      const thumb = isImg
+        ? `<img src="${a.dataUrl}" alt="" class="attach-thumb" />`
+        : `<span class="attach-file-icon">📄</span>`;
+      return `
+        <div class="attach-chip" data-attach-id="${a.id}">
+          ${thumb}
+          <div class="attach-meta">
+            <a href="${a.dataUrl}" download="${esc(a.name)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+            <span>${formatFileSize(a.size)} · ${esc((a.type || '').split('/')[1] || 'file')}</span>
+          </div>
+          ${editable ? `<button type="button" class="btn btn-sm btn-danger" data-remove-attach="${a.id}">Remove</button>` : ''}
+        </div>`;
+    }).join('')
+    : '<p class="hint" style="margin:0">No files attached yet.</p>';
+
+  if (!editable) {
+    return `<div class="attach-list">${chips}</div>`;
+  }
+
+  return `
+    <div class="attach-block">
+      <label>Photos / documents
+        <span class="hint-inline">Images compressed · max ${ATTACH_MAX_FILES} files · ${formatFileSize(ATTACH_MAX_BYTES)} each</span>
+        <input type="file" id="taskAttachInput" accept="${ATTACH_ACCEPT}" multiple />
+      </label>
+      <div class="attach-list" id="taskAttachList">${chips}</div>
+    </div>
+  `;
+}
+
+function refreshAttachListUI() {
+  const list = document.getElementById('taskAttachList');
+  if (!list) return;
+  const temp = document.createElement('div');
+  temp.innerHTML = attachmentsMarkup(modalAttachments, { editable: true });
+  const fresh = temp.querySelector('.attach-list');
+  list.innerHTML = fresh ? fresh.innerHTML : '';
+}
+
+function wireTaskAttachments() {
+  const input = document.getElementById('taskAttachInput');
+  const list = document.getElementById('taskAttachList');
+  if (!input || !list) return;
+
+  input.addEventListener('change', async () => {
+    const files = [...(input.files || [])];
+    input.value = '';
+    if (!files.length) return;
+    for (const file of files) {
+      if (modalAttachments.length >= ATTACH_MAX_FILES) {
+        toast(`Maximum ${ATTACH_MAX_FILES} attachments per task`);
+        break;
+      }
+      try {
+        const att = await fileToAttachment(file);
+        if (att) modalAttachments.push(att);
+      } catch (err) {
+        toast(err.message || 'Could not add file');
+      }
+    }
+    refreshAttachListUI();
+  });
+
+  list.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-remove-attach]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-remove-attach');
+    modalAttachments = modalAttachments.filter((a) => a.id !== id);
+    refreshAttachListUI();
+  });
+}
+
+function commitModalAttachments(task) {
+  if (!task) return;
+  task.attachments = modalAttachments.map((a) => ({ ...a }));
+}
+
 /** Resize any uploaded logo to fit a square box (sidebar icon size). */
 async function resizeLogoToFit(file, boxSize = 256) {
   const dataUrl = await readFileAsDataURL(file);
@@ -2387,6 +3025,7 @@ function renderDocumentation() {
         <h3>${esc(d.taskTitle)}</h3>
         <div class="doc-meta">${fmtDate(d.resolvedAt)} · ${esc(staffName(d.resolvedBy))} · TTR ${esc(d.timeToResolveLabel || formatDuration(d.timeToResolveMs) || '—')} · ${badge(d.category, d.category)}</div>
         <div class="doc-excerpt">${esc(d.whatWasDone)}</div>
+        ${(d.attachments || []).length ? `<div class="doc-meta">📎 ${(d.attachments || []).length} attachment(s)</div>` : ''}
       </div>
     `).join('')
     : '<div class="empty-state" style="grid-column:1/-1">No resolution documentation yet. Resolve a task and describe what was done.</div>';
@@ -2418,20 +3057,12 @@ function renderSettings() {
 
   const tagForm = document.getElementById('tagSettingsForm');
   const tagPanel = document.getElementById('tagSettingsPanel');
-  const admin = isAdmin();
   if (tagPanel) {
-    tagPanel.querySelectorAll('input, button').forEach((el) => {
-      if (el.id !== 'tagPreviewBox') el.disabled = !admin;
+    tagPanel.querySelectorAll('input, button, select, textarea').forEach((el) => {
+      el.disabled = false;
+      el.readOnly = false;
     });
-    if (!admin) {
-      const hint = tagPanel.querySelector('.admin-only-hint');
-      if (!hint) {
-        const p = document.createElement('p');
-        p.className = 'hint admin-only-hint';
-        p.textContent = 'Only administrators can change tag settings.';
-        tagForm?.prepend(p);
-      }
-    }
+    tagPanel.querySelectorAll('.admin-only-hint').forEach((el) => el.remove());
   }
   if (tagForm) {
     tagForm.assetTagPrefix.value = s.assetTagPrefix || 'IT';
@@ -2473,10 +3104,6 @@ function updateTagPreview() {
 
 document.getElementById('tagSettingsForm')?.addEventListener('submit', (e) => {
   e.preventDefault();
-  if (!isAdmin()) {
-    toast('Only administrators can change tag settings');
-    return;
-  }
   const fd = new FormData(e.target);
   state.settings.assetTagPrefix = (fd.get('assetTagPrefix') || 'IT').trim();
   state.settings.assetTagSeparator = fd.get('assetTagSeparator') ?? '-';
@@ -2488,16 +3115,21 @@ document.getElementById('tagSettingsForm')?.addEventListener('submit', (e) => {
   toast('Tag settings saved');
 });
 
-document.getElementById('tagSettingsForm')?.addEventListener('input', updateTagPreview);
+document.getElementById('tagSettingsForm')?.addEventListener('input', debounce(updateTagPreview, 120));
 document.getElementById('tagSettingsForm')?.addEventListener('change', updateTagPreview);
 
 document.getElementById('syncTagNumberBtn')?.addEventListener('click', () => {
-  if (!isAdmin()) {
-    toast('Only administrators can sync tag numbers');
-    return;
-  }
   syncTagNextNumberFromAssets();
 });
+
+window.goToTagSettings = function () {
+  document.getElementById('modal')?.close();
+  document.querySelector('[data-view="settings"]')?.click();
+  setTimeout(() => {
+    document.getElementById('tagSettingsPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.querySelector('#tagSettingsForm [name="assetTagNextNumber"]')?.focus();
+  }, 80);
+};
 
 document.getElementById('settingsForm')?.addEventListener('submit', (e) => {
   e.preventDefault();
@@ -2567,7 +3199,7 @@ document.getElementById('resetLogoBtn')?.addEventListener('click', () => {
   toast('Logo image removed');
 });
 
-document.getElementById('docSearch')?.addEventListener('input', renderDocumentation);
+document.getElementById('docSearch')?.addEventListener('input', debounce(renderDocumentation, 160));
 document.getElementById('docFilterCategory')?.addEventListener('change', renderDocumentation);
 document.getElementById('closeDocBtn')?.addEventListener('click', () => {
   document.getElementById('docDetailPanel').hidden = true;
@@ -2576,16 +3208,26 @@ document.getElementById('closeDocBtn')?.addEventListener('click', () => {
 function renderAll() {
   applyBranding();
   updateLoggedInUI();
-  renderDashboard();
-  renderMyWork();
-  renderAssets();
-  renderTasks();
-  renderDocumentation();
-  populateAssignSelects();
-  renderAssignmentHistory();
-  renderAutomation();
-  renderStorage();
-  renderSettings();
+  renderActiveView();
+  updateNotifBadges();
+}
+
+const VIEW_RENDERERS = {
+  dashboard: () => renderDashboard(),
+  mywork: () => renderMyWork(),
+  assets: () => renderAssets(),
+  tasks: () => renderTasks(),
+  documentation: () => renderDocumentation(),
+  assignments: () => { populateAssignSelects(); renderAssignmentHistory(); },
+  automation: () => renderAutomation(),
+  storage: () => renderStorage(),
+  settings: () => renderSettings(),
+};
+
+function renderActiveView() {
+  const view = getActiveViewName();
+  const render = VIEW_RENDERERS[view];
+  if (render) render();
 }
 
 /* ── Init ── */
@@ -2594,6 +3236,7 @@ async function boot() {
   await normalizeStoredLogo();
   await syncOnBoot();
   await ensureStaffAuth();
+  bindTaskHoverPreview();
 
   if (state.lastSaved) {
     document.getElementById('lastSaved').textContent = 'Saved ' + new Date(state.lastSaved).toLocaleString();
@@ -2612,7 +3255,7 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=6').then((reg) => {
+    navigator.serviceWorker.register('./sw.js?v=12').then((reg) => {
       reg.update();
     }).catch(() => {});
   }

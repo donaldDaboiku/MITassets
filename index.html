@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <!-- Login -->
@@ -231,7 +231,8 @@
                 <th>Name</th>
                 <th>Type</th>
                 <th>Status</th>
-                <th>Assigned To</th>
+                <th>Used By</th>
+                <th>IT Owner</th>
                 <th>Location</th>
                 <th>Next Maintenance</th>
                 <th>Actions</th>
@@ -328,16 +329,16 @@
               <label>
                 Item Type
                 <select name="itemType" required>
-                  <option value="asset">Asset</option>
-                  <option value="task">Task</option>
+                  <option value="asset">Asset → Device User</option>
+                  <option value="task">Task → IT Staff</option>
                 </select>
               </label>
               <label>
                 Select Item
                 <select name="itemId" id="assignItemSelect" required></select>
               </label>
-              <label>
-                Assign To
+              <label id="assignToLabel">
+                Assign To (Device User)
                 <select name="assignee" id="assigneeSelect" required></select>
               </label>
               <label>
@@ -514,7 +515,7 @@
             <p class="hint">Setup: create a free <a href="https://supabase.com" target="_blank" rel="noopener">Supabase</a> project → run <code>supabase-setup.sql</code> → paste URL & anon key in Settings.</p>
           </div>
           <div class="panel" id="teamPanel">
-            <h2>Team Members</h2>
+            <h2>IT Team Members</h2>
             <div id="adminStaffSection">
               <form id="staffForm" class="form form-inline">
                 <input type="text" name="name" placeholder="Name" required />
@@ -523,13 +524,24 @@
                 <input type="text" name="role" placeholder="Role (e.g. Technician)" />
                 <button type="submit" class="btn btn-primary">Add</button>
               </form>
-              <p class="hint">Administrator only. New members get default password: <strong>changeme123</strong></p>
+              <p class="hint">Administrator only. IT staff can log in and work on tasks. Default password: <strong>changeme123</strong></p>
             </div>
             <div id="selfPasswordSection" hidden>
               <p class="hint">Change your own login password.</p>
               <button type="button" class="btn btn-primary" id="changeMyPasswordBtn">Change My Password</button>
             </div>
             <div id="staffList" class="staff-list"></div>
+          </div>
+          <div class="panel" id="deviceUsersPanel">
+            <h2>Device Users</h2>
+            <p class="hint">Employees who use equipment (not for login). Assign assets to them for “who has this device” records.</p>
+            <form id="deviceUserForm" class="form form-inline">
+              <input type="text" name="name" placeholder="Full name" required />
+              <input type="email" name="email" placeholder="Email" />
+              <input type="text" name="department" placeholder="Department" />
+              <button type="submit" class="btn btn-primary">Add User</button>
+            </form>
+            <div id="deviceUserList" class="staff-list"></div>
           </div>
           <div class="panel danger-zone" id="dangerZonePanel">
             <h2>Danger Zone</h2>
@@ -541,6 +553,33 @@
       <!-- Settings -->
       <section class="view" id="view-settings">
         <div class="panel-grid">
+          <div class="panel" id="tagSettingsPanel">
+            <h2>Asset Tag Numbering</h2>
+            <p class="hint">Configure how new asset tags are generated. Any signed-in staff can edit these settings.</p>
+            <form id="tagSettingsForm" class="form">
+              <label>Tag Prefix
+                <input type="text" name="assetTagPrefix" placeholder="IT" required autocomplete="off" />
+              </label>
+              <label>Separator
+                <input type="text" name="assetTagSeparator" placeholder="-" maxlength="3" autocomplete="off" />
+              </label>
+              <label>Number padding (digits)
+                <input type="number" name="assetTagPadding" min="1" max="6" value="3" />
+              </label>
+              <label>Next tag number
+                <input type="number" name="assetTagNextNumber" min="1" value="1" />
+              </label>
+              <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+                Include type code (e.g. IT-LP-001)
+                <input type="checkbox" name="assetTagIncludeType" />
+              </label>
+              <div class="tag-preview-box" id="tagPreviewBox">Next tag: IT-001</div>
+              <div class="workflow-btns">
+                <button type="submit" class="btn btn-primary" id="saveTagSettingsBtn">Save Tag Settings</button>
+                <button type="button" class="btn btn-secondary" id="syncTagNumberBtn">Sync next # from existing assets</button>
+              </div>
+            </form>
+          </div>
           <div class="panel">
             <h2>App Branding</h2>
             <form id="settingsForm" class="form">
@@ -572,31 +611,6 @@
               <div class="logo-preview" id="logoPreview"></div>
               <button type="submit" class="btn btn-primary">Save Settings</button>
               <button type="button" class="btn btn-ghost" id="resetLogoBtn">Remove Logo Image</button>
-            </form>
-          </div>
-          <div class="panel" id="tagSettingsPanel">
-            <h2>Asset Tag Numbering</h2>
-            <p class="hint">Configure how new asset tags are generated. Admins can edit; everyone sees the next tag when adding assets.</p>
-            <form id="tagSettingsForm" class="form">
-              <label>Tag Prefix
-                <input type="text" name="assetTagPrefix" placeholder="IT" required />
-              </label>
-              <label>Separator
-                <input type="text" name="assetTagSeparator" placeholder="-" maxlength="3" />
-              </label>
-              <label>Number padding (digits)
-                <input type="number" name="assetTagPadding" min="1" max="6" value="3" />
-              </label>
-              <label>Next tag number
-                <input type="number" name="assetTagNextNumber" min="1" value="1" />
-              </label>
-              <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
-                Include type code (e.g. IT-LP-001)
-                <input type="checkbox" name="assetTagIncludeType" />
-              </label>
-              <div class="tag-preview-box" id="tagPreviewBox">Next tag: IT-001</div>
-              <button type="submit" class="btn btn-primary" id="saveTagSettingsBtn">Save Tag Settings</button>
-              <button type="button" class="btn btn-secondary" id="syncTagNumberBtn">Sync next # from existing assets</button>
             </form>
           </div>
           <div class="panel">
@@ -691,7 +705,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="cloud.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="cloud.js?v=12"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>
