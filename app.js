@@ -32,6 +32,10 @@ function parseTagNumber(tag) {
 }
 
 function syncTagNextNumberFromAssets() {
+  if (!isAdmin()) {
+    toast('Only administrators can sync tag numbers');
+    return;
+  }
   let max = 0;
   state.assets.forEach((a) => {
     const n = parseTagNumber(a.tag);
@@ -1119,7 +1123,7 @@ function assetFormFields(a = {}, isNew = false) {
         <input name="tag" value="${esc(suggestedTag)}" required placeholder="${esc(generateAssetTag('laptop'))}" />
         ${isNew ? '<button type="button" class="btn btn-sm btn-secondary" id="generateTagBtn">Use next #</button>' : ''}
       </div>
-      ${isNew ? '<span class="hint-inline">From Settings → Asset Tag Numbering · <button type="button" class="btn btn-sm btn-ghost" onclick="goToTagSettings()">Edit numbering</button></span>' : ''}
+      ${isNew ? `<span class="hint-inline">From Settings → Asset Tag Numbering${isAdmin() ? ' · <button type="button" class="btn btn-sm btn-ghost" onclick="goToTagSettings()">Edit numbering</button>' : ''}</span>` : ''}
     </label>
     <label>Name <input name="name" value="${esc(a.name || '')}" required placeholder="Dell Latitude 5540" /></label>
     <label>Type
@@ -3057,12 +3061,19 @@ function renderSettings() {
 
   const tagForm = document.getElementById('tagSettingsForm');
   const tagPanel = document.getElementById('tagSettingsPanel');
+  const admin = isAdmin();
   if (tagPanel) {
     tagPanel.querySelectorAll('input, button, select, textarea').forEach((el) => {
-      el.disabled = false;
+      el.disabled = !admin;
       el.readOnly = false;
     });
     tagPanel.querySelectorAll('.admin-only-hint').forEach((el) => el.remove());
+    if (!admin) {
+      const p = document.createElement('p');
+      p.className = 'hint admin-only-hint';
+      p.textContent = 'Only administrators can change tag settings. You can still view the next tag when adding assets.';
+      tagForm?.prepend(p);
+    }
   }
   if (tagForm) {
     tagForm.assetTagPrefix.value = s.assetTagPrefix || 'IT';
@@ -3104,6 +3115,10 @@ function updateTagPreview() {
 
 document.getElementById('tagSettingsForm')?.addEventListener('submit', (e) => {
   e.preventDefault();
+  if (!isAdmin()) {
+    toast('Only administrators can change tag settings');
+    return;
+  }
   const fd = new FormData(e.target);
   state.settings.assetTagPrefix = (fd.get('assetTagPrefix') || 'IT').trim();
   state.settings.assetTagSeparator = fd.get('assetTagSeparator') ?? '-';
@@ -3119,10 +3134,18 @@ document.getElementById('tagSettingsForm')?.addEventListener('input', debounce(u
 document.getElementById('tagSettingsForm')?.addEventListener('change', updateTagPreview);
 
 document.getElementById('syncTagNumberBtn')?.addEventListener('click', () => {
+  if (!isAdmin()) {
+    toast('Only administrators can sync tag numbers');
+    return;
+  }
   syncTagNextNumberFromAssets();
 });
 
 window.goToTagSettings = function () {
+  if (!isAdmin()) {
+    toast('Only administrators can change tag settings');
+    return;
+  }
   document.getElementById('modal')?.close();
   document.querySelector('[data-view="settings"]')?.click();
   setTimeout(() => {
@@ -3255,7 +3278,7 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=12').then((reg) => {
+    navigator.serviceWorker.register('./sw.js?v=13').then((reg) => {
       reg.update();
     }).catch(() => {});
   }
