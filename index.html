@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
   <!-- Login -->
@@ -37,7 +37,7 @@
         <button type="submit" class="btn btn-primary btn-block">Sign In</button>
       </form>
       <p class="hint login-hint" id="loginHintList">Loading accounts…</p>
-      <button type="button" class="btn btn-ghost btn-sm" id="repairLoginBtn" style="margin-top:0.75rem">Restore default accounts (admin, john, sarah)</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="repairLoginBtn" style="margin-top:0.75rem">Restore default accounts</button>
     </div>
   </div>
 
@@ -105,6 +105,14 @@
 
         <div class="stats-grid" style="margin-top:0">
           <div class="stat-card">
+            <span class="stat-label">Online (presence)</span>
+            <span class="stat-value" id="statOnline">0</span>
+          </div>
+          <div class="stat-card warn">
+            <span class="stat-label">Offline (presence)</span>
+            <span class="stat-value" id="statOffline">0</span>
+          </div>
+          <div class="stat-card">
             <span class="stat-label">Resolved This Week</span>
             <span class="stat-value" id="statWeekResolved">0</span>
           </div>
@@ -112,6 +120,9 @@
             <span class="stat-label">Opened This Week</span>
             <span class="stat-value" id="statWeekOpened">0</span>
           </div>
+        </div>
+
+        <div class="stats-grid" style="margin-top:0">
           <div class="stat-card">
             <span class="stat-label">Avg Time to Resolve</span>
             <span class="stat-value" id="statAvgTtr" style="font-size:1.35rem">—</span>
@@ -130,6 +141,10 @@
           <div class="panel">
             <h2>Maintenance Alerts</h2>
             <div id="dashAlerts" class="list-mini"></div>
+          </div>
+          <div class="panel">
+            <h2>Stale / Offline Devices</h2>
+            <div id="dashPresenceStale" class="list-mini"></div>
           </div>
           <div class="panel">
             <h2>Asset Status</h2>
@@ -206,7 +221,9 @@
           <button type="button" class="btn btn-ghost" id="exportAssetsBtn">Export Assets</button>
           <select id="assetFilterStatus">
             <option value="">All statuses</option>
+            <option value="available">Available</option>
             <option value="active">Active</option>
+            <option value="offline">Offline</option>
             <option value="maintenance">Maintenance</option>
             <option value="retired">Retired</option>
             <option value="lost">Lost</option>
@@ -231,6 +248,7 @@
                 <th>Name</th>
                 <th>Type</th>
                 <th>Status</th>
+                <th>Last seen</th>
                 <th>Used By</th>
                 <th>IT Owner</th>
                 <th>Location</th>
@@ -626,6 +644,29 @@
               <p class="hint" style="margin-top:1rem">Changes apply across the app sidebar, page title, and reports.</p>
             </div>
           </div>
+          <div class="panel" id="presenceSettingsPanel">
+            <h2>Network Presence</h2>
+            <p class="hint">Mark devices Active when a heartbeat arrives; Offline after the timeout. Agents cannot scan from the browser — use the scripts in <code>agents/</code>.</p>
+            <form id="presenceSettingsForm" class="form">
+              <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+                Enable presence monitoring
+                <input type="checkbox" name="presenceEnabled" />
+              </label>
+              <label>Offline after (minutes)
+                <input type="number" name="offlineAfterMinutes" min="5" max="1440" value="20" />
+              </label>
+              <label>Heartbeat shared secret <span class="hint-inline">(admin — for agents / Edge Function)</span>
+                <input type="password" name="heartbeatSecret" autocomplete="off" placeholder="Set same value as HEARTBEAT_SECRET" />
+              </label>
+              <label>Heartbeat URL
+                <input type="text" id="heartbeatUrlDisplay" readonly placeholder="Configure Supabase URL first" />
+              </label>
+              <div class="workflow-btns">
+                <button type="submit" class="btn btn-primary">Save Presence Settings</button>
+                <button type="button" class="btn btn-secondary" id="pullHeartbeatsBtn">Pull heartbeats now</button>
+              </div>
+            </form>
+          </div>
           <div class="panel">
             <h2>Cloud Sync Settings</h2>
             <p class="hint">Backs up all app data to Supabase so clearing the browser does not wipe records.</p>
@@ -705,7 +746,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="cloud.js?v=13"></script>
-  <script src="app.js?v=13"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

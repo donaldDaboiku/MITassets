@@ -1,5 +1,22 @@
-const CACHE = 'mit-asset-v13';
-const ASSETS = ['./', './index.html', './styles.css', './app.js', './cloud.js', './manifest.json', './icons/icon.svg'];
+const CACHE = 'mit-asset-v15';
+const ASSETS = [
+  './',
+  './index.html',
+  './styles.css',
+  './js/main.js',
+  './js/utils.js',
+  './js/bridge.js',
+  './js/state.js',
+  './js/auth.js',
+  './js/views.js',
+  './js/reports-automation.js',
+  './js/storage-ui.js',
+  './js/cloud.js',
+  './js/presence.js',
+  './js/ui-core.js',
+  './manifest.json',
+  './icons/icon.svg',
+];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));

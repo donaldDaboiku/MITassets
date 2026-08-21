@@ -859,7 +859,9 @@ textarea {
   text-transform: uppercase;
 }
 
+.badge-available { background: rgba(56, 189, 248, 0.2); color: #38bdf8; }
 .badge-active, .badge-open { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+.badge-offline { background: rgba(100, 116, 139, 0.25); color: #94a3b8; }
 .badge-maintenance, .badge-in-progress { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
 .badge-retired, .badge-closed, .badge-resolved { background: rgba(139, 156, 179, 0.2); color: var(--muted); }
 .badge-lost, .badge-critical { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
