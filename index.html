@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=19">
+  <link rel="stylesheet" href="styles.css?v=21">
 </head>
 <body>
   <!-- Login -->
@@ -248,6 +248,7 @@
                 <th>Name</th>
                 <th>Type</th>
                 <th>Status</th>
+                <th>Subsidiary</th>
                 <th>Last seen</th>
                 <th>Used By</th>
                 <th>IT Owner</th>
@@ -552,11 +553,12 @@
           </div>
           <div class="panel" id="deviceUsersPanel">
             <h2>Device Users</h2>
-            <p class="hint">Employees who use equipment (not for login). Import from Excel/CSV (Name, Email, Department). Word (.docx) is not supported — export that list to Excel first.</p>
+            <p class="hint">Employees who use equipment (not for login). Import from Excel/CSV (Name, Email, Department, Subsidiary). Word (.docx) is not supported — export that list to Excel first.</p>
             <form id="deviceUserForm" class="form form-inline">
               <input type="text" name="name" placeholder="Full name" required />
               <input type="email" name="email" placeholder="Email" />
               <input type="text" name="department" placeholder="Department" />
+              <input type="text" name="subsidiary" placeholder="Subsidiary" />
               <button type="submit" class="btn btn-primary">Add User</button>
             </form>
             <div class="toolbar" style="margin:0.75rem 0;padding:0;border:0;flex-wrap:wrap;gap:0.5rem">

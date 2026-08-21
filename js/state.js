@@ -154,7 +154,7 @@ export function findOrCreateDeviceUser(name) {
   const existing = findUserByNameOrEmail(trimmed);
   if (existing) return existing;
   const id = uid();
-  state.users.push({ id, name: trimmed, email: '', department: '' });
+  state.users.push({ id, name: trimmed, email: '', department: '', subsidiary: '' });
   return id;
 }
 

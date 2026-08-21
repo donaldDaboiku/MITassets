@@ -592,7 +592,7 @@ function renderAssets() {
     if (statusF && a.status !== statusF) return false;
     if (typeF && a.type !== typeF) return false;
     if (search) {
-      const hay = `${a.tag} ${a.name} ${a.location} ${userName(a.usedBy)} ${staffName(a.assignee)}`.toLowerCase();
+      const hay = `${a.tag} ${a.name} ${a.location} ${a.subsidiary || ''} ${userName(a.usedBy)} ${staffName(a.assignee)}`.toLowerCase();
       if (!hay.includes(search)) return false;
     }
     return true;
@@ -600,7 +600,7 @@ function renderAssets() {
 
   const tbody = document.getElementById('assetsTable');
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty-state">No assets found. Click "+ Add Asset" to get started.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="empty-state">No assets found. Click "+ Add Asset" to get started.</td></tr>';
     return;
   }
 
@@ -612,6 +612,7 @@ function renderAssets() {
       <td>${esc(a.name)}</td>
       <td>${esc(a.type)}</td>
       <td>${badge(a.status, a.status)}</td>
+      <td>${esc(a.subsidiary || '—')}</td>
       <td>${esc(formatLastSeen(a.lastSeenAt))}</td>
       <td>${esc(userName(a.usedBy))}</td>
       <td>${esc(a.assignee ? staffName(a.assignee) : '—')}</td>
@@ -653,6 +654,7 @@ function assetFormFields(a = {}, isNew = false) {
       </select>
     </label>
     <label>Serial Number <input name="serial" value="${esc(a.serial || '')}" /></label>
+    <label>Subsidiary <input name="subsidiary" value="${esc(a.subsidiary || '')}" placeholder="e.g. MIT Nigeria, MIT Ghana" /></label>
     <label>Agent ID <span class="hint-inline">(heartbeat identity — usually same as tag)</span>
       <input name="agentId" value="${esc(a.agentId || a.tag || '')}" placeholder="IT-LP-001" />
     </label>
@@ -687,7 +689,7 @@ document.getElementById('addAssetBtn').addEventListener('click', () => {
 });
 
 const ASSET_IMPORT_HEADERS = [
-  'Tag', 'Name', 'Type', 'Status', 'Serial', 'Location', 'Used By', 'IT Owner', 'Next Maintenance', 'Notes',
+  'Tag', 'Name', 'Type', 'Status', 'Serial', 'Subsidiary', 'Location', 'Used By', 'IT Owner', 'Next Maintenance', 'Notes',
 ];
 
 const ASSET_TYPE_ALIASES = {
@@ -775,6 +777,7 @@ function mapAssetImportRow(row) {
     type: ASSET_TYPE_ALIASES[typeKey] || ASSET_TYPE_ALIASES[normalizeHeader(rawType)] || 'other',
     status: ASSET_STATUS_ALIASES[statusKey] || 'active',
     serial: get('Serial', 'Serial Number', 'S/N', 'SN'),
+    subsidiary: get('Subsidiary', 'Company', 'Entity', 'Business Unit', 'BU'),
     location: get('Location', 'Site', 'Office'),
     usedBy,
     assignee,
@@ -801,6 +804,7 @@ function downloadAssetTemplate() {
     Type: 'laptop',
     Status: 'active',
     Serial: 'ABC123',
+    Subsidiary: 'MIT HQ',
     Location: 'HQ Floor 2',
     'Used By': 'Jane Employee',
     'IT Owner': 'John Smith',
@@ -817,6 +821,7 @@ function exportAssetsToExcel() {
     Type: a.type || '',
     Status: a.status || '',
     Serial: a.serial || '',
+    Subsidiary: a.subsidiary || '',
     Location: a.location || '',
     'Used By': userName(a.usedBy) === '—' ? '' : userName(a.usedBy),
     'IT Owner': staffName(a.assignee) === 'Unassigned' ? '' : staffName(a.assignee),
@@ -824,7 +829,7 @@ function exportAssetsToExcel() {
     Notes: a.notes || '',
   }));
   downloadAssetWorkbook(rows.length ? rows : [{
-    Tag: '', Name: '', Type: '', Status: '', Serial: '', Location: '',
+    Tag: '', Name: '', Type: '', Status: '', Serial: '', Subsidiary: '', Location: '',
     'Used By': '', 'IT Owner': '', 'Next Maintenance': '', Notes: '',
   }], `mit-assets-export-${Date.now()}.xlsx`);
   toast(`Exported ${state.assets.length} asset(s)`);
@@ -861,6 +866,7 @@ async function importAssetsFromFile(file) {
         type: mapped.type || existing.type,
         status: mapped.status || existing.status,
         serial: mapped.serial || existing.serial,
+        subsidiary: mapped.subsidiary || existing.subsidiary,
         location: mapped.location || existing.location,
         usedBy: mapped.usedBy || existing.usedBy,
         assignee: mapped.assignee || existing.assignee,
@@ -1651,15 +1657,15 @@ function seedDemoData() {
   const userJane = uid();
   const userMark = uid();
   state.users.push(
-    { id: userJane, name: 'Jane Employee', email: 'jane@company.com', department: 'Finance' },
-    { id: userMark, name: 'Mark Rivera', email: 'mark@company.com', department: 'Operations' },
+    { id: userJane, name: 'Jane Employee', email: 'jane@company.com', department: 'Finance', subsidiary: 'MIT HQ' },
+    { id: userMark, name: 'Mark Rivera', email: 'mark@company.com', department: 'Operations', subsidiary: 'MIT HQ' },
   );
 
   const serverId = uid();
   state.assets.push(
-    { id: uid(), tag: 'IT-LP-001', name: 'Dell Latitude 5540', type: 'laptop', status: 'active', serial: 'DL5540-001', location: 'HQ Floor 2', usedBy: userJane, assignee: staff[1]?.id, nextMaintenance: addDays(30), notes: '', created: new Date().toISOString() },
-    { id: uid(), tag: 'IT-MN-012', name: 'LG 27" Monitor', type: 'monitor', status: 'active', serial: 'LG27-012', location: 'HQ Floor 2', usedBy: userJane, assignee: staff[1]?.id, nextMaintenance: addDays(90), notes: '', created: new Date().toISOString() },
-    { id: serverId, tag: 'IT-SV-003', name: 'Dell PowerEdge R740', type: 'server', status: 'maintenance', serial: 'PE740-003', location: 'Server Room', usedBy: '', assignee: staff[0]?.id, nextMaintenance: addDays(-2), notes: 'RAM upgrade pending', created: new Date().toISOString() },
+    { id: uid(), tag: 'IT-LP-001', name: 'Dell Latitude 5540', type: 'laptop', status: 'active', serial: 'DL5540-001', subsidiary: 'MIT HQ', location: 'HQ Floor 2', usedBy: userJane, assignee: staff[1]?.id, nextMaintenance: addDays(30), notes: '', created: new Date().toISOString() },
+    { id: uid(), tag: 'IT-MN-012', name: 'LG 27" Monitor', type: 'monitor', status: 'active', serial: 'LG27-012', subsidiary: 'MIT HQ', location: 'HQ Floor 2', usedBy: userJane, assignee: staff[1]?.id, nextMaintenance: addDays(90), notes: '', created: new Date().toISOString() },
+    { id: serverId, tag: 'IT-SV-003', name: 'Dell PowerEdge R740', type: 'server', status: 'maintenance', serial: 'PE740-003', subsidiary: 'MIT HQ', location: 'Server Room', usedBy: '', assignee: staff[0]?.id, nextMaintenance: addDays(-2), notes: 'RAM upgrade pending', created: new Date().toISOString() },
   );
 
   const resolvedTaskId = uid();
@@ -1755,7 +1761,7 @@ function renderStorage() {
         <div class="staff-card">
           <div>
             <strong>${esc(u.name)}</strong>
-            <div class="meta">${esc(u.department || 'No department')} · ${esc(u.email || 'No email')} · ${held} device(s)</div>
+            <div class="meta">${esc(u.subsidiary || 'No subsidiary')} · ${esc(u.department || 'No department')} · ${esc(u.email || 'No email')} · ${held} device(s)</div>
           </div>
           <button class="btn btn-sm btn-danger" onclick="removeDeviceUser('${u.id}')">Remove</button>
         </div>`;
@@ -1816,6 +1822,7 @@ document.getElementById('deviceUserForm')?.addEventListener('submit', (e) => {
     name,
     email: String(fd.get('email') || '').trim(),
     department: String(fd.get('department') || '').trim(),
+    subsidiary: String(fd.get('subsidiary') || '').trim(),
   });
   saveState();
   e.target.reset();
@@ -1823,7 +1830,7 @@ document.getElementById('deviceUserForm')?.addEventListener('submit', (e) => {
   toast(`Device user ${name} added`);
 });
 
-const USER_IMPORT_HEADERS = ['Name', 'Email', 'Department'];
+const USER_IMPORT_HEADERS = ['Name', 'Email', 'Department', 'Subsidiary'];
 
 function downloadUserWorkbook(rows, filename) {
   if (!window.XLSX) {
@@ -1850,6 +1857,7 @@ function mapUserImportRow(row) {
     name,
     email: get('Email', 'E-mail', 'Work Email', 'Mail'),
     department: get('Department', 'Dept', 'Team', 'Division'),
+    subsidiary: get('Subsidiary', 'Company', 'Entity', 'Business Unit', 'BU'),
   };
 }
 
@@ -1884,6 +1892,7 @@ async function importUsersFromFile(file) {
       if (u) {
         if (mapped.email) u.email = mapped.email;
         if (mapped.department) u.department = mapped.department;
+        if (mapped.subsidiary) u.subsidiary = mapped.subsidiary;
         if (mapped.name) u.name = mapped.name;
         updated++;
       } else {
@@ -1897,6 +1906,7 @@ async function importUsersFromFile(file) {
       name: mapped.name,
       email: mapped.email,
       department: mapped.department,
+      subsidiary: mapped.subsidiary,
     });
     added++;
   });
@@ -1914,6 +1924,7 @@ document.getElementById('downloadUserTemplateBtn')?.addEventListener('click', ()
     Name: 'Jane Doe',
     Email: 'jane@company.com',
     Department: 'Finance',
+    Subsidiary: 'MIT HQ',
   }], 'mit-device-users-template.xlsx');
   toast('Template downloaded');
 });
@@ -1924,8 +1935,9 @@ document.getElementById('exportUsersBtn')?.addEventListener('click', () => {
     Name: u.name || '',
     Email: u.email || '',
     Department: u.department || '',
+    Subsidiary: u.subsidiary || '',
   }));
-  downloadUserWorkbook(rows.length ? rows : [{ Name: '', Email: '', Department: '' }], `mit-users-export-${Date.now()}.xlsx`);
+  downloadUserWorkbook(rows.length ? rows : [{ Name: '', Email: '', Department: '', Subsidiary: '' }], `mit-users-export-${Date.now()}.xlsx`);
   toast(`Exported ${state.users.length} user(s)`);
 });
 
@@ -2456,6 +2468,17 @@ function refreshAttachListUI() {
   temp.innerHTML = attachmentsMarkup(modalAttachments, { editable: true });
   const fresh = temp.querySelector('.attach-list');
   list.innerHTML = fresh ? fresh.innerHTML : '';
+}
+
+function wireTaskLinkedAssetCategory() {
+  const sel = document.querySelector('#modalBody [name="linkedAssetId"]');
+  const cat = document.querySelector('#modalBody [name="category"]');
+  if (!sel || !cat) return;
+  sel.addEventListener('change', () => {
+    if (!sel.value) return;
+    const asset = state.assets.find((a) => a.id === sel.value);
+    if (asset) cat.value = assetTypeToTaskCategory(asset.type);
+  });
 }
 
 function wireTaskAttachments() {

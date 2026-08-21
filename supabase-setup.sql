@@ -56,3 +56,29 @@ create policy "mit_heartbeats_anon_select"
 
 -- No anon INSERT/UPDATE/DELETE — Edge Function uses service role key.
 
+-- ── Subsidiary (app field) ───────────────────────────────────────────────────
+-- Assets and device users store optional "subsidiary" in mit_workspace.payload:
+--   payload->'assets'->n->>'subsidiary'
+--   payload->'users'->n->>'subsidiary'
+-- Excel import/export columns: Subsidiary (also accepts Company / Entity / BU).
+-- There is no separate assets row table; the workspace JSON is the source of truth.
+
+-- Optional lookup catalog (manage in SQL Editor if you want a fixed list):
+create table if not exists public.mit_subsidiaries (
+  workspace_id text not null default 'main',
+  name text not null,
+  code text,
+  created_at timestamptz not null default now(),
+  primary key (workspace_id, name)
+);
+
+alter table public.mit_subsidiaries enable row level security;
+
+drop policy if exists "mit_subsidiaries_anon_all" on public.mit_subsidiaries;
+create policy "mit_subsidiaries_anon_all"
+  on public.mit_subsidiaries
+  for all
+  to anon, authenticated
+  using (true)
+  with check (true);
+
