@@ -2342,8 +2342,6 @@ const ATTACH_MAX_FILES = 6;
 const ATTACH_MAX_BYTES = 2.5 * 1024 * 1024; // 2.5 MB per file (after compress for images)
 const ATTACH_ACCEPT = 'image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.csv';
 
-let modalAttachments = [];
-
 function ensureTaskAttachments(task) {
   if (!task) return [];
   if (!Array.isArray(task.attachments)) task.attachments = [];

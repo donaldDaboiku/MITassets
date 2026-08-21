@@ -7,6 +7,7 @@ export {
   renderAll,
   renderActiveView,
   bindTaskHoverPreview,
+  normalizeStoredLogo,
   openModal,
   applyBranding,
   runAutomation,
