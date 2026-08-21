@@ -6,7 +6,7 @@ import {
 import {
   state, saveState, applyState, defaultState, STORAGE_KEY,
   staffName, userName, partyName, ensureUsersArray, findOrCreateDeviceUser,
-  findStaffByNameOrEmail, generateAssetTag, bumpTagCounter, parseTagNumber,
+  findUserByNameOrEmail, findStaffByNameOrEmail, generateAssetTag, bumpTagCounter, parseTagNumber,
   syncTagNextNumberFromAssets, logAutomation, logAssignment, notifyUser,
   unreadCount, getSessionUserId, setSession, clearSession, getCurrentUser,
   isAdmin, assetTypeToTaskCategory, wireAssetTagField,
@@ -1821,6 +1821,123 @@ document.getElementById('deviceUserForm')?.addEventListener('submit', (e) => {
   e.target.reset();
   renderAll();
   toast(`Device user ${name} added`);
+});
+
+const USER_IMPORT_HEADERS = ['Name', 'Email', 'Department'];
+
+function downloadUserWorkbook(rows, filename) {
+  if (!window.XLSX) {
+    toast('Excel library not loaded — refresh the page');
+    return;
+  }
+  const ws = XLSX.utils.json_to_sheet(rows, { header: USER_IMPORT_HEADERS });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Users');
+  XLSX.writeFile(wb, filename);
+}
+
+function mapUserImportRow(row) {
+  const get = (...keys) => {
+    for (const k of keys) {
+      const hit = Object.keys(row).find((h) => h.trim().toLowerCase() === k.toLowerCase());
+      if (hit != null && String(row[hit]).trim() !== '') return String(row[hit]).trim();
+    }
+    return '';
+  };
+  const name = get('Name', 'Full Name', 'Employee', 'User', 'Employee Name');
+  if (!name) return null;
+  return {
+    name,
+    email: get('Email', 'E-mail', 'Work Email', 'Mail'),
+    department: get('Department', 'Dept', 'Team', 'Division'),
+  };
+}
+
+async function importUsersFromFile(file) {
+  if (!window.XLSX) {
+    toast('Excel library not loaded — refresh the page');
+    return;
+  }
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data, { type: 'array', cellDates: true });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+  if (!rows.length) {
+    toast('No rows found in the sheet');
+    return;
+  }
+
+  ensureUsersArray();
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  rows.forEach((row) => {
+    const mapped = mapUserImportRow(row);
+    if (!mapped) { skipped++; return; }
+
+    const byEmail = mapped.email ? findUserByNameOrEmail(mapped.email) : '';
+    const byName = findUserByNameOrEmail(mapped.name);
+    const existingId = byEmail || byName;
+    if (existingId) {
+      const u = state.users.find((x) => x.id === existingId);
+      if (u) {
+        if (mapped.email) u.email = mapped.email;
+        if (mapped.department) u.department = mapped.department;
+        if (mapped.name) u.name = mapped.name;
+        updated++;
+      } else {
+        skipped++;
+      }
+      return;
+    }
+
+    state.users.push({
+      id: uid(),
+      name: mapped.name,
+      email: mapped.email,
+      department: mapped.department,
+    });
+    added++;
+  });
+
+  saveState();
+  renderAll();
+  const summary = `Imported: ${added} added, ${updated} updated, ${skipped} skipped`;
+  const el = document.getElementById('userImportSummary');
+  if (el) el.textContent = summary;
+  toast(summary);
+}
+
+document.getElementById('downloadUserTemplateBtn')?.addEventListener('click', () => {
+  downloadUserWorkbook([{
+    Name: 'Jane Doe',
+    Email: 'jane@company.com',
+    Department: 'Finance',
+  }], 'mit-device-users-template.xlsx');
+  toast('Template downloaded');
+});
+
+document.getElementById('exportUsersBtn')?.addEventListener('click', () => {
+  ensureUsersArray();
+  const rows = state.users.map((u) => ({
+    Name: u.name || '',
+    Email: u.email || '',
+    Department: u.department || '',
+  }));
+  downloadUserWorkbook(rows.length ? rows : [{ Name: '', Email: '', Department: '' }], `mit-users-export-${Date.now()}.xlsx`);
+  toast(`Exported ${state.users.length} user(s)`);
+});
+
+document.getElementById('userImportFile')?.addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    await importUsersFromFile(file);
+  } catch (_) {
+    toast('Could not read that file — use .xlsx or .csv');
+  }
 });
 
 window.removeDeviceUser = function (id) {

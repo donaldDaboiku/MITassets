@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
   <!-- Login -->
@@ -552,13 +552,22 @@
           </div>
           <div class="panel" id="deviceUsersPanel">
             <h2>Device Users</h2>
-            <p class="hint">Employees who use equipment (not for login). Assign assets to them for “who has this device” records.</p>
+            <p class="hint">Employees who use equipment (not for login). Import from Excel/CSV (Name, Email, Department). Word (.docx) is not supported — export that list to Excel first.</p>
             <form id="deviceUserForm" class="form form-inline">
               <input type="text" name="name" placeholder="Full name" required />
               <input type="email" name="email" placeholder="Email" />
               <input type="text" name="department" placeholder="Department" />
               <button type="submit" class="btn btn-primary">Add User</button>
             </form>
+            <div class="toolbar" style="margin:0.75rem 0;padding:0;border:0;flex-wrap:wrap;gap:0.5rem">
+              <label class="btn btn-secondary file-btn">
+                Upload Excel / CSV
+                <input type="file" id="userImportFile" accept=".xlsx,.xls,.csv" hidden />
+              </label>
+              <button type="button" class="btn btn-ghost" id="downloadUserTemplateBtn">Download Template</button>
+              <button type="button" class="btn btn-ghost" id="exportUsersBtn">Export Users</button>
+              <span class="hint" id="userImportSummary" style="margin:0"></span>
+            </div>
             <div id="deviceUserList" class="staff-list"></div>
           </div>
           <div class="panel danger-zone" id="dangerZonePanel">
