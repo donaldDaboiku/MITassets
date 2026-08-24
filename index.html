@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=25">
+  <link rel="stylesheet" href="styles.css?v=26">
 </head>
 <body>
   <!-- Login -->
@@ -542,9 +542,11 @@
                 <input type="text" name="username" placeholder="Username (login)" required />
                 <input type="email" name="email" placeholder="Email" />
                 <input type="text" name="role" placeholder="Role (e.g. Technician)" />
+                <input type="text" name="subsidiary" placeholder="Subsidiary (optional)" list="staffSubsidiaryList" />
+                <datalist id="staffSubsidiaryList"></datalist>
                 <button type="submit" class="btn btn-primary">Add</button>
               </form>
-              <p class="hint">Administrator only. IT staff can log in and work on tasks. Default password: <strong>changeme123</strong></p>
+              <p class="hint">Administrator only. Assign a <strong>subsidiary</strong> so that staff only manage devices for that company. Leave blank to manage all. Default password: <strong>changeme123</strong></p>
             </div>
             <div id="selfPasswordSection" hidden>
               <p class="hint">Change your own login password.</p>

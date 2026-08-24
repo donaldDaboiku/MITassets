@@ -2,7 +2,7 @@
  * Network presence — heartbeats + offline timeout.
  * Browser cannot scan LAN; agents POST heartbeats; PWA reconciles status.
  */
-import { state, saveState, logAutomation } from './state.js';
+import { state, saveState, logAutomation, canManageAsset } from './state.js';
 import { callHook, setHook } from './bridge.js';
 import { fmtDate } from './utils.js';
 
@@ -156,6 +156,7 @@ export function presenceStats() {
 
   state.assets.forEach((a) => {
     ensureAssetPresenceFields(a);
+    if (!canManageAsset(a)) return;
     if (!['active', 'offline'].includes(a.status)) return;
 
     if (isAssetOnline(a, now)) {

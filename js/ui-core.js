@@ -9,7 +9,8 @@ import {
   findUserByNameOrEmail, findStaffByNameOrEmail, generateAssetTag, bumpTagCounter, parseTagNumber,
   syncTagNextNumberFromAssets, logAutomation, logAssignment, notifyUser,
   unreadCount, getSessionUserId, setSession, clearSession, getCurrentUser,
-  isAdmin, assetTypeToTaskCategory, wireAssetTagField,
+  isAdmin, assetsInScope, canManageAsset, listSubsidiaries, normalizeSubsidiary,
+  assetTypeToTaskCategory, wireAssetTagField,
 } from './state.js';
 import {
   hashPassword, ensureStaffAuth, repairAllStaffLogins,
@@ -467,7 +468,7 @@ document.querySelectorAll('.nav-btn').forEach((btn) => {
 
 /* ── Dashboard ── */
 function renderDashboard() {
-  const assets = state.assets;
+  const assets = assetsInScope();
   const tasks = state.tasks;
   const openTasks = tasks.filter((t) => !['resolved', 'closed'].includes(t.status));
   const assigned = assets.filter((a) => a.usedBy).length +
@@ -591,7 +592,7 @@ function renderAssets() {
   const search = document.getElementById('globalSearch').value.toLowerCase();
 
   ensureUsersArray();
-  let list = state.assets.filter((a) => {
+  let list = assetsInScope().filter((a) => {
     if (statusF && a.status !== statusF) return false;
     if (typeF && a.type !== typeF) return false;
     if (search) {
@@ -657,7 +658,7 @@ function assetFormFields(a = {}, isNew = false) {
       </select>
     </label>
     <label>Serial Number <input name="serial" value="${esc(a.serial || '')}" /></label>
-    <label>Subsidiary <input name="subsidiary" value="${esc(a.subsidiary || '')}" placeholder="e.g. MIT Nigeria, MIT Ghana" /></label>
+    <label>Subsidiary <input name="subsidiary" value="${esc(a.subsidiary || getCurrentUser()?.subsidiary || '')}" placeholder="e.g. MIT Nigeria, MIT Ghana" ${!isAdmin() && getCurrentUser()?.subsidiary ? 'readonly' : ''} /></label>
     <label>Agent ID <span class="hint-inline">(heartbeat identity — usually same as tag)</span>
       <input name="agentId" value="${esc(a.agentId || a.tag || '')}" placeholder="IT-LP-001" />
     </label>
@@ -683,6 +684,11 @@ function assetFormFields(a = {}, isNew = false) {
 
 window.editAsset = function (id) {
   const a = state.assets.find((x) => x.id === id);
+  if (!a) return;
+  if (!canManageAsset(a)) {
+    toast('This asset is outside your subsidiary');
+    return;
+  }
   openModal('Edit Asset', 'asset', id, assetFormFields(a, false));
 };
 
@@ -818,7 +824,8 @@ function downloadAssetTemplate() {
 }
 
 function exportAssetsToExcel() {
-  const rows = state.assets.map((a) => ({
+  const list = assetsInScope();
+  const rows = list.map((a) => ({
     Tag: a.tag || '',
     Name: a.name || '',
     Type: a.type || '',
@@ -835,7 +842,7 @@ function exportAssetsToExcel() {
     Tag: '', Name: '', Type: '', Status: '', Serial: '', Subsidiary: '', Location: '',
     'Used By': '', 'IT Owner': '', 'Next Maintenance': '', Notes: '',
   }], `mit-assets-export-${Date.now()}.xlsx`);
-  toast(`Exported ${state.assets.length} asset(s)`);
+  toast(`Exported ${list.length} asset(s)`);
 }
 
 async function importAssetsFromFile(file) {
@@ -855,10 +862,18 @@ async function importAssetsFromFile(file) {
   let added = 0;
   let updated = 0;
   let skipped = 0;
+  const scopeSub = !isAdmin() ? normalizeSubsidiary(getCurrentUser()?.subsidiary) : '';
 
   rows.forEach((row) => {
     const mapped = mapAssetImportRow(row);
     if (!mapped) { skipped++; return; }
+    if (scopeSub) {
+      if (mapped.subsidiary && normalizeSubsidiary(mapped.subsidiary) !== scopeSub) {
+        skipped++;
+        return;
+      }
+      mapped.subsidiary = getCurrentUser().subsidiary;
+    }
 
     const existing = state.assets.find(
       (a) => (a.tag || '').toLowerCase() === mapped.tag.toLowerCase()
@@ -1254,7 +1269,7 @@ function populateAssignSelects() {
   }
 
   if (itemSel) {
-    const items = type === 'asset' ? state.assets : state.tasks.filter((t) => !['closed'].includes(t.status));
+    const items = type === 'asset' ? assetsInScope() : state.tasks.filter((t) => !['closed'].includes(t.status));
     itemSel.innerHTML = items.map((i) => {
       const label = type === 'asset' ? `${i.tag} — ${i.name}` : `${i.title}`;
       return `<option value="${i.id}">${esc(label)}</option>`;
@@ -1277,7 +1292,7 @@ function populateAssignSelects() {
 
   if (reassignSel) {
     const assigned = [];
-    state.assets.filter((a) => a.usedBy).forEach((a) => {
+    state.assets.filter((a) => a.usedBy && canManageAsset(a)).forEach((a) => {
       assigned.push({ key: `asset:${a.id}`, label: `Asset: ${a.tag} → ${userName(a.usedBy)}`, party: a.usedBy });
     });
     state.tasks.filter((t) => t.assignee && !['closed'].includes(t.status)).forEach((t) => {
@@ -1735,10 +1750,12 @@ function renderStorage() {
 
   document.getElementById('staffList').innerHTML = state.staff.map((s) => {
     const isSelf = current?.id === s.id;
+    const subLabel = s.subsidiary ? ` · ${esc(s.subsidiary)}` : ' · All subsidiaries';
     let actions = '';
     if (admin) {
       actions = `
         <div class="workflow-btns">
+          <button class="btn btn-sm btn-secondary" onclick="assignStaffSubsidiary('${s.id}')">Subsidiary</button>
           <button class="btn btn-sm btn-ghost" onclick="resetStaffPassword('${s.id}')">Reset PW</button>
           ${state.staff.length > 1 && s.id !== current?.id ? `<button class="btn btn-sm btn-danger" onclick="removeStaff('${s.id}')">Remove</button>` : ''}
         </div>`;
@@ -1749,11 +1766,16 @@ function renderStorage() {
     <div class="staff-card${isSelf ? ' staff-card-self' : ''}">
       <div>
         <strong>${esc(s.name)}</strong>
-        <div class="meta">@${esc(s.username || '')} · ${esc(s.role || '')} · ${esc(s.email || '')}</div>
+        <div class="meta">@${esc(s.username || '')} · ${esc(s.role || '')}${subLabel} · ${esc(s.email || '')}</div>
       </div>
       ${actions}
     </div>`;
   }).join('');
+
+  const subList = document.getElementById('staffSubsidiaryList');
+  if (subList) {
+    subList.innerHTML = listSubsidiaries().map((n) => `<option value="${esc(n)}"></option>`).join('');
+  }
 
   ensureUsersArray();
   const deviceUserList = document.getElementById('deviceUserList');
@@ -1800,6 +1822,7 @@ document.getElementById('staffForm').addEventListener('submit', async (e) => {
     name: fd.get('name'),
     email: fd.get('email'),
     role: fd.get('role') || 'Technician',
+    subsidiary: String(fd.get('subsidiary') || '').trim(),
     username,
     passwordHash: await hashPassword(defaultPw),
     mustChangePassword: true,
@@ -1956,6 +1979,42 @@ document.getElementById('userImportFile')?.addEventListener('change', async (e) 
   }
 });
 
+function assignStaffSubsidiary(id) {
+  if (!isAdmin()) {
+    toast('Only administrators can assign subsidiaries');
+    return;
+  }
+  const user = state.staff.find((s) => s.id === id);
+  if (!user) return;
+  const known = listSubsidiaries();
+  const hint = known.length ? `\nKnown: ${known.join(', ')}` : '';
+  const next = prompt(
+    `Subsidiary for ${user.name}.\nLeave blank to manage all companies.${hint}`,
+    user.subsidiary || ''
+  );
+  if (next === null) return;
+  user.subsidiary = String(next).trim();
+  let owned = 0;
+  if (user.subsidiary) {
+    const match = state.assets.filter(
+      (a) => normalizeSubsidiary(a.subsidiary) === normalizeSubsidiary(user.subsidiary)
+    );
+    if (match.length && confirm(
+      `Set ${user.name} as IT Owner on all ${match.length} asset(s) in ${user.subsidiary}?`
+    )) {
+      match.forEach((a) => { a.assignee = user.id; });
+      owned = match.length;
+    }
+  }
+  saveState();
+  renderAll();
+  toast(
+    user.subsidiary
+      ? `${user.name} manages ${user.subsidiary}${owned ? ` · IT Owner on ${owned} asset(s)` : ''}`
+      : `${user.name} can manage all subsidiaries`
+  );
+};
+
 window.removeDeviceUser = function (id) {
   ensureUsersArray();
   const held = state.assets.filter((a) => a.usedBy === id);
@@ -2051,8 +2110,14 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
   const data = Object.fromEntries(fd.entries());
 
   if (modalMode === 'asset') {
+    const scopeSub = !isAdmin() ? String(getCurrentUser()?.subsidiary || '').trim() : '';
+    if (scopeSub) data.subsidiary = scopeSub;
     if (editId) {
       const a = state.assets.find((x) => x.id === editId);
+      if (!canManageAsset(a)) {
+        toast('This asset is outside your subsidiary');
+        return;
+      }
       const prevStatus = a.status;
       const prevUsedBy = a.usedBy;
       const prevAssignee = a.assignee;
@@ -2940,6 +3005,7 @@ window.deleteTask = deleteTask;
 window.changeMyPassword = changeMyPassword;
 window.resetStaffPassword = resetStaffPassword;
 window.removeStaff = removeStaff;
+window.assignStaffSubsidiary = assignStaffSubsidiary;
 
 
 
@@ -2968,6 +3034,7 @@ export function registerWindowActions() {
   window.changeMyPassword = changeMyPassword;
   window.resetStaffPassword = resetStaffPassword;
   window.removeStaff = removeStaff;
+  window.assignStaffSubsidiary = assignStaffSubsidiary;
 }
 
 export {

@@ -279,6 +279,35 @@ export function isAdmin() {
     || role.includes('admin');
 }
 
+export function normalizeSubsidiary(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+/** Unique subsidiary names from assets, device users, and staff. */
+export function listSubsidiaries() {
+  const set = new Set();
+  (state.assets || []).forEach((a) => { if (a.subsidiary) set.add(String(a.subsidiary).trim()); });
+  (state.users || []).forEach((u) => { if (u.subsidiary) set.add(String(u.subsidiary).trim()); });
+  (state.staff || []).forEach((s) => { if (s.subsidiary) set.add(String(s.subsidiary).trim()); });
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Admin and staff with no subsidiary see all assets.
+ * Staff with a subsidiary only manage assets in that subsidiary.
+ */
+export function canManageAsset(asset) {
+  if (isAdmin()) return true;
+  const user = getCurrentUser();
+  const scope = normalizeSubsidiary(user?.subsidiary);
+  if (!scope) return true;
+  return normalizeSubsidiary(asset?.subsidiary) === scope;
+}
+
+export function assetsInScope() {
+  return (state.assets || []).filter(canManageAsset);
+}
+
 export function syncTagNextNumberFromAssets() {
   if (!isAdmin()) {
     toast('Only administrators can sync tag numbers');
