@@ -54,7 +54,7 @@ export function ensureAssetPresenceFields(asset) {
 
 /**
  * Apply presence rules to all assets.
- * Only toggles active ↔ offline; never overrides available/maintenance/retired/lost.
+ * Only toggles active ↔ offline; never overrides available/maintenance/transferred/retired/lost.
  * @returns {{ markedOffline: number, markedActive: number, changed: boolean }}
  */
 export function reconcilePresence({ save = true, silent = true } = {}) {

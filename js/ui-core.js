@@ -10,6 +10,7 @@ import {
   syncTagNextNumberFromAssets, logAutomation, logAssignment, notifyUser,
   unreadCount, getSessionUserId, setSession, clearSession, getCurrentUser,
   isAdmin, assetsInScope, canManageAsset, listSubsidiaries, normalizeSubsidiary,
+  staffSubsidiaries, parseSubsidiaryInput, assetHistory,
   assetTypeToTaskCategory, wireAssetTagField,
 } from './state.js';
 import {
@@ -612,7 +613,7 @@ function renderAssets() {
     ensureAssetPresenceFields(a);
     return `
     <tr>
-      <td><strong>${esc(a.tag)}</strong></td>
+      <td><strong><a href="#" onclick="event.preventDefault();showAssetDetail('${a.id}')">${esc(a.tag)}</a></strong></td>
       <td>${esc(a.name)}</td>
       <td>${esc(a.type)}</td>
       <td>${badge(a.status, a.status)}</td>
@@ -623,6 +624,7 @@ function renderAssets() {
       <td>${esc(a.location || '—')}</td>
       <td>${fmtDate(a.nextMaintenance)}</td>
       <td>
+        <button class="btn btn-sm btn-ghost" onclick="showAssetDetail('${a.id}')">History</button>
         <button class="btn btn-sm btn-ghost" onclick="editAsset('${a.id}')">Edit</button>
         <button class="btn btn-sm btn-secondary" onclick="showAssetQr('${a.id}')">QR</button>
         ${a.status === 'maintenance' ? `<button class="btn btn-sm btn-primary" onclick="completeMaintenance('${a.id}')">Complete</button>` : ''}
@@ -634,6 +636,16 @@ function renderAssets() {
 
 function assetFormFields(a = {}, isNew = false) {
   const suggestedTag = a.tag || (isNew ? generateAssetTag(a.type || 'laptop') : '');
+  const mySubs = staffSubsidiaries(getCurrentUser());
+  const lockSub = !isAdmin() && mySubs.length > 0;
+  const defaultSub = a.subsidiary || (mySubs.length === 1 ? mySubs[0] : '') || '';
+  const subField = lockSub && mySubs.length > 1
+    ? `<label>Subsidiary
+        <select name="subsidiary" required>
+          ${mySubs.map((s) => `<option value="${esc(s)}" ${normalizeSubsidiary(defaultSub) === normalizeSubsidiary(s) ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+        </select>
+      </label>`
+    : `<label>Subsidiary <input name="subsidiary" value="${esc(defaultSub)}" placeholder="e.g. MIT Nigeria, MIT Ghana" ${lockSub ? 'readonly' : ''} /></label>`;
   return `
     <label>Asset Tag
       <div class="tag-input-row">
@@ -652,13 +664,13 @@ function assetFormFields(a = {}, isNew = false) {
     </label>
     <label>Status
       <select name="status">
-        ${['available','active','offline','maintenance','retired','lost'].map((s) =>
+        ${['available','active','offline','maintenance','transferred','retired','lost'].map((s) =>
           `<option value="${s}" ${a.status === s ? 'selected' : ''}>${s}</option>`
         ).join('')}
       </select>
     </label>
     <label>Serial Number <input name="serial" value="${esc(a.serial || '')}" /></label>
-    <label>Subsidiary <input name="subsidiary" value="${esc(a.subsidiary || getCurrentUser()?.subsidiary || '')}" placeholder="e.g. MIT Nigeria, MIT Ghana" ${!isAdmin() && getCurrentUser()?.subsidiary ? 'readonly' : ''} /></label>
+    ${subField}
     <label>Agent ID <span class="hint-inline">(heartbeat identity — usually same as tag)</span>
       <input name="agentId" value="${esc(a.agentId || a.tag || '')}" placeholder="IT-LP-001" />
     </label>
@@ -692,6 +704,131 @@ window.editAsset = function (id) {
   openModal('Edit Asset', 'asset', id, assetFormFields(a, false));
 };
 
+function assetDetailMarkup(a) {
+  const hist = assetHistory(a.id);
+  const linked = state.tasks.filter((t) => t.linkedAssetId === a.id)
+    .sort((x, y) => new Date(y.created) - new Date(x.created))
+    .slice(0, 8);
+  const histHtml = hist.length
+    ? hist.map((h) => {
+      const fromLabel = partyName(h.from) !== '—' ? partyName(h.from) : (h.from || '—');
+      const toLabel = partyName(h.to) !== '—' ? partyName(h.to) : (h.to || '—');
+      return `
+      <div class="list-item">
+        <span><strong>${esc(h.action)}</strong> · ${esc(fromLabel)} → ${esc(toLabel)}<br>
+        <span class="meta">${esc(h.notes || '')}</span></span>
+        <span class="meta">${fmtDate(h.date)}</span>
+      </div>`;
+    }).join('')
+    : '<div class="empty-state">No history yet</div>';
+  const tasksHtml = linked.length
+    ? linked.map((t) => `<div class="list-item"><span>${esc(t.title)}</span>${badge(t.status, t.status)}</div>`).join('')
+    : '<div class="empty-state">No linked tasks</div>';
+  return `
+    <div class="task-detail-grid">
+      <div class="task-detail-row"><strong>Tag</strong>${esc(a.tag)}</div>
+      <div class="task-detail-row"><strong>Name</strong>${esc(a.name)}</div>
+      <div class="task-detail-row"><strong>Status</strong>${badge(a.status, a.status)}</div>
+      <div class="task-detail-row"><strong>Subsidiary</strong>${esc(a.subsidiary || '—')}</div>
+      <div class="task-detail-row"><strong>Used By</strong>${esc(userName(a.usedBy))}</div>
+      <div class="task-detail-row"><strong>IT Owner</strong>${esc(a.assignee ? staffName(a.assignee) : '—')}</div>
+      <div class="task-detail-row"><strong>Location</strong>${esc(a.location || '—')}</div>
+      <div class="task-detail-row"><strong>Serial</strong>${esc(a.serial || '—')}</div>
+      <div class="task-detail-row"><strong>Last seen</strong>${esc(formatLastSeen(a.lastSeenAt))}</div>
+      <div class="task-detail-row"><strong>Notes</strong>${esc(a.notes || '—')}</div>
+    </div>
+    <div class="workflow-btns" style="margin:1rem 0">
+      <button type="button" class="btn btn-sm btn-primary" onclick="editAsset('${a.id}')">Edit</button>
+      <button type="button" class="btn btn-sm btn-secondary" onclick="openReassignAsset('${a.id}')">Reassign</button>
+      <button type="button" class="btn btn-sm btn-secondary" onclick="openTransferAsset('${a.id}')">Transfer</button>
+      <button type="button" class="btn btn-sm btn-ghost" onclick="retireAsset('${a.id}')">Retire</button>
+    </div>
+    <h3 style="margin:1rem 0 0.5rem;font-size:0.95rem">Device history</h3>
+    <div class="list-mini">${histHtml}</div>
+    <h3 style="margin:1rem 0 0.5rem;font-size:0.95rem">Linked tasks</h3>
+    <div class="list-mini">${tasksHtml}</div>
+  `;
+}
+
+window.showAssetDetail = function (id) {
+  const a = state.assets.find((x) => x.id === id);
+  if (!a) return;
+  if (!canManageAsset(a)) {
+    toast('This asset is outside your subsidiary');
+    return;
+  }
+  openModal(`${a.tag} — ${a.name}`, 'asset-detail', id, assetDetailMarkup(a));
+};
+
+window.openReassignAsset = function (id) {
+  const a = state.assets.find((x) => x.id === id);
+  if (!a || !canManageAsset(a)) return;
+  ensureUsersArray();
+  openModal(`Reassign — ${a.tag}`, 'asset-reassign', id, `
+    <p class="hint">Current user: <strong>${esc(userName(a.usedBy))}</strong></p>
+    <label>New device user
+      <select name="usedBy" required>
+        <option value="">Select…</option>
+        ${(state.users || []).map((u) =>
+          `<option value="${u.id}" ${a.usedBy === u.id ? 'selected' : ''}>${esc(u.name)}${u.department ? ` (${esc(u.department)})` : ''}</option>`
+        ).join('')}
+      </select>
+    </label>
+    <label>IT Owner (optional)
+      <select name="assignee">
+        <option value="">Keep current</option>
+        ${state.staff.map((s) =>
+          `<option value="${s.id}" ${a.assignee === s.id ? 'selected' : ''}>${esc(s.name)}</option>`
+        ).join('')}
+      </select>
+    </label>
+    <label>Notes <textarea name="notes" rows="2" placeholder="Reason for reassignment…"></textarea></label>
+  `);
+};
+
+window.openTransferAsset = function (id) {
+  const a = state.assets.find((x) => x.id === id);
+  if (!a || !canManageAsset(a)) return;
+  const known = listSubsidiaries();
+  openModal(`Transfer — ${a.tag}`, 'asset-transfer', id, `
+    <p class="hint">Marks the device <strong>transferred</strong>. Optionally move subsidiary and/or clear the current user.</p>
+    <label>New subsidiary
+      <input name="subsidiary" list="transferSubList" value="${esc(a.subsidiary || '')}" placeholder="Destination company" />
+      <datalist id="transferSubList">${known.map((n) => `<option value="${esc(n)}"></option>`).join('')}</datalist>
+    </label>
+    <label>New device user (optional)
+      <select name="usedBy">
+        <option value="">Unassign / keep none</option>
+        ${(state.users || []).map((u) =>
+          `<option value="${u.id}">${esc(u.name)}</option>`
+        ).join('')}
+      </select>
+    </label>
+    <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+      Clear current user
+      <input type="checkbox" name="clearUser" checked />
+    </label>
+    <label>Notes <textarea name="notes" rows="2" placeholder="Transfer reason / ticket #"></textarea></label>
+  `);
+};
+
+window.retireAsset = function (id) {
+  const a = state.assets.find((x) => x.id === id);
+  if (!a || !canManageAsset(a)) return;
+  if (!confirm(`Mark ${a.tag} as retired?`)) return;
+  const prevStatus = a.status;
+  const prevUser = a.usedBy;
+  a.status = 'retired';
+  a.usedBy = '';
+  logAssignment('asset', a.id, `${a.tag} — ${a.name}`, 'Retired', prevStatus, 'retired', '');
+  if (prevUser) {
+    logAssignment('asset', a.id, `${a.tag} — ${a.name}`, 'Unassigned on retire', prevUser, '', '');
+  }
+  saveState();
+  renderAll();
+  toast(`${a.tag} retired`);
+};
+
 document.getElementById('addAssetBtn').addEventListener('click', () => {
   openModal('Add Asset', 'asset', null, assetFormFields({ type: 'laptop' }, true));
   setTimeout(() => wireAssetTagField(true), 0);
@@ -716,6 +853,7 @@ const ASSET_STATUS_ALIASES = {
   active: 'active', inuse: 'active', 'in use': 'active', deployed: 'active',
   offline: 'offline', disconnected: 'offline',
   maintenance: 'maintenance', repair: 'maintenance', repairing: 'maintenance',
+  transferred: 'transferred', transfer: 'transferred', relocated: 'transferred',
   retired: 'retired', disposed: 'retired', decommissioned: 'retired',
   lost: 'lost', missing: 'lost', stolen: 'lost',
 };
@@ -862,17 +1000,25 @@ async function importAssetsFromFile(file) {
   let added = 0;
   let updated = 0;
   let skipped = 0;
-  const scopeSub = !isAdmin() ? normalizeSubsidiary(getCurrentUser()?.subsidiary) : '';
+  const scopeSubs = !isAdmin()
+    ? staffSubsidiaries(getCurrentUser()).map(normalizeSubsidiary)
+    : [];
 
   rows.forEach((row) => {
     const mapped = mapAssetImportRow(row);
     if (!mapped) { skipped++; return; }
-    if (scopeSub) {
-      if (mapped.subsidiary && normalizeSubsidiary(mapped.subsidiary) !== scopeSub) {
+    if (scopeSubs.length) {
+      const rowSub = normalizeSubsidiary(mapped.subsidiary);
+      if (rowSub && !scopeSubs.includes(rowSub)) {
         skipped++;
         return;
       }
-      mapped.subsidiary = getCurrentUser().subsidiary;
+      if (!rowSub && scopeSubs.length === 1) {
+        mapped.subsidiary = staffSubsidiaries(getCurrentUser())[0];
+      } else if (!rowSub) {
+        skipped++;
+        return;
+      }
     }
 
     const existing = state.assets.find(
@@ -1750,12 +1896,13 @@ function renderStorage() {
 
   document.getElementById('staffList').innerHTML = state.staff.map((s) => {
     const isSelf = current?.id === s.id;
-    const subLabel = s.subsidiary ? ` · ${esc(s.subsidiary)}` : ' · All subsidiaries';
+    const subs = staffSubsidiaries(s);
+    const subLabel = subs.length ? ` · ${esc(subs.join(', '))}` : ' · All subsidiaries';
     let actions = '';
     if (admin) {
       actions = `
         <div class="workflow-btns">
-          <button class="btn btn-sm btn-secondary" onclick="assignStaffSubsidiary('${s.id}')">Subsidiary</button>
+          <button class="btn btn-sm btn-secondary" onclick="assignStaffSubsidiary('${s.id}')">Subsidiaries</button>
           <button class="btn btn-sm btn-ghost" onclick="resetStaffPassword('${s.id}')">Reset PW</button>
           ${state.staff.length > 1 && s.id !== current?.id ? `<button class="btn btn-sm btn-danger" onclick="removeStaff('${s.id}')">Remove</button>` : ''}
         </div>`;
@@ -1822,7 +1969,8 @@ document.getElementById('staffForm').addEventListener('submit', async (e) => {
     name: fd.get('name'),
     email: fd.get('email'),
     role: fd.get('role') || 'Technician',
-    subsidiary: String(fd.get('subsidiary') || '').trim(),
+    subsidiaries: parseSubsidiaryInput(fd.get('subsidiary')),
+    subsidiary: parseSubsidiaryInput(fd.get('subsidiary'))[0] || '',
     username,
     passwordHash: await hashPassword(defaultPw),
     mustChangePassword: true,
@@ -1987,33 +2135,26 @@ function assignStaffSubsidiary(id) {
   const user = state.staff.find((s) => s.id === id);
   if (!user) return;
   const known = listSubsidiaries();
-  const hint = known.length ? `\nKnown: ${known.join(', ')}` : '';
-  const next = prompt(
-    `Subsidiary for ${user.name}.\nLeave blank to manage all companies.${hint}`,
-    user.subsidiary || ''
-  );
-  if (next === null) return;
-  user.subsidiary = String(next).trim();
-  let owned = 0;
-  if (user.subsidiary) {
-    const match = state.assets.filter(
-      (a) => normalizeSubsidiary(a.subsidiary) === normalizeSubsidiary(user.subsidiary)
-    );
-    if (match.length && confirm(
-      `Set ${user.name} as IT Owner on all ${match.length} asset(s) in ${user.subsidiary}?`
-    )) {
-      match.forEach((a) => { a.assignee = user.id; });
-      owned = match.length;
-    }
-  }
-  saveState();
-  renderAll();
-  toast(
-    user.subsidiary
-      ? `${user.name} manages ${user.subsidiary}${owned ? ` · IT Owner on ${owned} asset(s)` : ''}`
-      : `${user.name} can manage all subsidiaries`
-  );
-};
+  const current = staffSubsidiaries(user);
+  const checks = known.map((n) => {
+    const on = current.some((c) => normalizeSubsidiary(c) === normalizeSubsidiary(n));
+    return `<label class="toggle-item" style="flex-direction:row;justify-content:space-between;gap:1rem">
+      ${esc(n)}
+      <input type="checkbox" name="sub" value="${esc(n)}" ${on ? 'checked' : ''} />
+    </label>`;
+  }).join('') || '<p class="hint">No subsidiaries yet — type names below (from assets/users).</p>';
+  openModal(`Subsidiaries — ${user.name}`, 'staff-subs', id, `
+    <p class="hint">Select one or more. Leave all unchecked for access to <strong>all</strong> companies.</p>
+    ${checks}
+    <label>Add more (comma-separated)
+      <input name="extra" placeholder="MIT Ghana, MIT Kenya" value="" />
+    </label>
+    <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+      Set as IT Owner on matching assets
+      <input type="checkbox" name="setOwner" />
+    </label>
+  `);
+}
 
 window.removeDeviceUser = function (id) {
   ensureUsersArray();
@@ -2094,7 +2235,10 @@ function openModal(title, mode, id, bodyHtml) {
   if (submit) {
     submit.textContent = mode === 'resolve' ? 'Resolve & Save'
       : mode === 'attach' ? 'Save Attachments'
-      : mode === 'qr' || mode === 'task-detail' ? 'Close'
+      : mode === 'asset-transfer' ? 'Transfer'
+      : mode === 'asset-reassign' ? 'Reassign'
+      : mode === 'staff-subs' ? 'Save Subsidiaries'
+      : mode === 'qr' || mode === 'task-detail' || mode === 'asset-detail' ? 'Close'
       : 'Save';
   }
   document.getElementById('modal').showModal();
@@ -2110,8 +2254,8 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
   const data = Object.fromEntries(fd.entries());
 
   if (modalMode === 'asset') {
-    const scopeSub = !isAdmin() ? String(getCurrentUser()?.subsidiary || '').trim() : '';
-    if (scopeSub) data.subsidiary = scopeSub;
+    const mySubs = staffSubsidiaries(getCurrentUser());
+    if (!isAdmin() && mySubs.length === 1) data.subsidiary = mySubs[0];
     if (editId) {
       const a = state.assets.find((x) => x.id === editId);
       if (!canManageAsset(a)) {
@@ -2121,8 +2265,15 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
       const prevStatus = a.status;
       const prevUsedBy = a.usedBy;
       const prevAssignee = a.assignee;
+      const prevSub = a.subsidiary;
       Object.assign(a, data);
       handleMaintenanceComplete(a, prevStatus);
+      if ((data.status || '') !== (prevStatus || '')) {
+        logAssignment('asset', editId, `${a.tag} — ${a.name}`, `Status → ${data.status}`, prevStatus, data.status, '');
+      }
+      if ((data.subsidiary || '') !== (prevSub || '')) {
+        logAssignment('asset', editId, `${a.tag} — ${a.name}`, 'Subsidiary changed', prevSub, data.subsidiary, '');
+      }
       if ((data.usedBy || '') !== (prevUsedBy || '')) {
         logAssignment('asset', editId, `${a.tag} — ${a.name}`, 'Assigned to user via edit', prevUsedBy, data.usedBy, '');
       }
@@ -2136,6 +2287,66 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
         logAssignment('asset', state.assets[state.assets.length - 1].id, `${data.tag} — ${data.name}`, 'Assigned to user', '', data.usedBy, '');
       }
     }
+  } else if (modalMode === 'asset-reassign') {
+    const a = state.assets.find((x) => x.id === editId);
+    if (!a || !canManageAsset(a)) {
+      toast('Asset not found or out of scope');
+      return;
+    }
+    const prev = a.usedBy;
+    a.usedBy = data.usedBy || '';
+    if (data.assignee) a.assignee = data.assignee;
+    if (a.status === 'available' || a.status === 'transferred') a.status = 'active';
+    logAssignment('asset', a.id, `${a.tag} — ${a.name}`, 'Reassigned to user', prev, a.usedBy, data.notes || '');
+    toast('Device reassigned');
+  } else if (modalMode === 'asset-transfer') {
+    const a = state.assets.find((x) => x.id === editId);
+    if (!a || !canManageAsset(a)) {
+      toast('Asset not found or out of scope');
+      return;
+    }
+    const prevSub = a.subsidiary;
+    const prevUser = a.usedBy;
+    const prevStatus = a.status;
+    a.status = 'transferred';
+    if (data.subsidiary) a.subsidiary = String(data.subsidiary).trim();
+    if (data.clearUser || !data.usedBy) {
+      a.usedBy = data.usedBy || '';
+    } else if (data.usedBy) {
+      a.usedBy = data.usedBy;
+    }
+    logAssignment('asset', a.id, `${a.tag} — ${a.name}`, 'Transferred', prevStatus, 'transferred', data.notes || '');
+    if ((a.subsidiary || '') !== (prevSub || '')) {
+      logAssignment('asset', a.id, `${a.tag} — ${a.name}`, 'Subsidiary transfer', prevSub, a.subsidiary, data.notes || '');
+    }
+    if ((a.usedBy || '') !== (prevUser || '')) {
+      logAssignment('asset', a.id, `${a.tag} — ${a.name}`, 'User change on transfer', prevUser, a.usedBy, data.notes || '');
+    }
+    toast(`${a.tag} marked transferred`);
+  } else if (modalMode === 'staff-subs') {
+    if (!isAdmin()) {
+      toast('Only administrators can assign subsidiaries');
+      return;
+    }
+    const user = state.staff.find((s) => s.id === editId);
+    if (!user) return;
+    const selected = fd.getAll('sub').map((v) => String(v).trim()).filter(Boolean);
+    const extra = parseSubsidiaryInput(data.extra);
+    const merged = [...new Set([...selected, ...extra].map((s) => s.trim()).filter(Boolean))];
+    user.subsidiaries = merged;
+    user.subsidiary = merged[0] || '';
+    let owned = 0;
+    if (data.setOwner && merged.length) {
+      const norms = merged.map(normalizeSubsidiary);
+      const match = state.assets.filter((a) => norms.includes(normalizeSubsidiary(a.subsidiary)));
+      match.forEach((a) => { a.assignee = user.id; });
+      owned = match.length;
+    }
+    toast(
+      merged.length
+        ? `${user.name} manages: ${merged.join(', ')}${owned ? ` · IT Owner on ${owned}` : ''}`
+        : `${user.name} can manage all subsidiaries`
+    );
   } else if (modalMode === 'task') {
     if (editId) {
       const t = state.tasks.find((x) => x.id === editId);
@@ -2177,7 +2388,7 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
         notifyUser(newTask.assignee, 'Assigned', newTask.title, 'task', newTask.id, '');
       }
     }
-  } else if (modalMode === 'qr' || modalMode === 'task-detail') {
+  } else if (modalMode === 'qr' || modalMode === 'task-detail' || modalMode === 'asset-detail') {
     document.getElementById('modal').close();
     return;
   } else if (modalMode === 'attach') {

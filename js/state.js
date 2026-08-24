@@ -283,29 +283,58 @@ export function normalizeSubsidiary(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+/** Parse comma / semicolon separated subsidiary names. */
+export function parseSubsidiaryInput(value) {
+  return String(value || '')
+    .split(/[,;|]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Subsidiaries assigned to an IT staff member (supports legacy single string). */
+export function staffSubsidiaries(staff) {
+  if (!staff) return [];
+  if (Array.isArray(staff.subsidiaries) && staff.subsidiaries.length) {
+    return staff.subsidiaries.map((s) => String(s).trim()).filter(Boolean);
+  }
+  return parseSubsidiaryInput(staff.subsidiary);
+}
+
 /** Unique subsidiary names from assets, device users, and staff. */
 export function listSubsidiaries() {
   const set = new Set();
-  (state.assets || []).forEach((a) => { if (a.subsidiary) set.add(String(a.subsidiary).trim()); });
-  (state.users || []).forEach((u) => { if (u.subsidiary) set.add(String(u.subsidiary).trim()); });
-  (state.staff || []).forEach((s) => { if (s.subsidiary) set.add(String(s.subsidiary).trim()); });
+  (state.assets || []).forEach((a) => {
+    if (a.subsidiary) set.add(String(a.subsidiary).trim());
+  });
+  (state.users || []).forEach((u) => {
+    if (u.subsidiary) set.add(String(u.subsidiary).trim());
+  });
+  (state.staff || []).forEach((s) => {
+    staffSubsidiaries(s).forEach((name) => set.add(name));
+  });
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 
 /**
- * Admin and staff with no subsidiary see all assets.
- * Staff with a subsidiary only manage assets in that subsidiary.
+ * Admin and staff with no subsidiaries see all assets.
+ * Staff with subsidiaries only manage assets in those companies.
  */
 export function canManageAsset(asset) {
   if (isAdmin()) return true;
-  const user = getCurrentUser();
-  const scope = normalizeSubsidiary(user?.subsidiary);
-  if (!scope) return true;
-  return normalizeSubsidiary(asset?.subsidiary) === scope;
+  const scopes = staffSubsidiaries(getCurrentUser()).map(normalizeSubsidiary);
+  if (!scopes.length) return true;
+  return scopes.includes(normalizeSubsidiary(asset?.subsidiary));
 }
 
 export function assetsInScope() {
   return (state.assets || []).filter(canManageAsset);
+}
+
+/** History rows for one asset (newest first). */
+export function assetHistory(assetId) {
+  return (state.assignmentHistory || []).filter(
+    (h) => h.itemType === 'asset' && h.itemId === assetId
+  );
 }
 
 export function syncTagNextNumberFromAssets() {
