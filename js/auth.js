@@ -333,6 +333,35 @@ export function deleteAsset(id) {
   toast('Asset deleted');
 }
 
+/** Admin: wipe asset inventory so a corrected Excel can be re-uploaded. */
+export function clearAllAssets() {
+  if (!isAdmin()) {
+    toast('Only administrators can delete all assets');
+    return;
+  }
+  const n = state.assets.length;
+  if (!n) {
+    toast('No assets to delete');
+    return;
+  }
+  if (!confirm(`Delete all ${n} assets?\n\nYou can then upload a corrected Excel/CSV. Tasks and device users are kept.`)) {
+    return;
+  }
+  if (!confirm('Permanently delete all assets? This cannot be undone locally.')) return;
+
+  const ids = new Set(state.assets.map((a) => a.id));
+  state.assets = [];
+  state.assignmentHistory = (state.assignmentHistory || []).filter(
+    (h) => h.itemType !== 'asset' || !ids.has(h.itemId)
+  );
+  (state.tasks || []).forEach((t) => {
+    if (t.linkedAssetId && ids.has(t.linkedAssetId)) t.linkedAssetId = '';
+  });
+  saveState();
+  callHook('renderAll');
+  toast(`Deleted ${n} assets — upload Excel to replace`);
+}
+
 export function deleteTask(id) {
   if (!isAdmin()) { toast('Only administrators can delete tasks'); return; }
   if (!confirm('Delete this task?')) return;

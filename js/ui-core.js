@@ -15,7 +15,7 @@ import {
   hashPassword, ensureStaffAuth, repairAllStaffLogins,
   handleLogin, showApp, showLogin, updateLoggedInUI, renderLoginHints,
   maybeForcePasswordChange, changeMyPassword, resetStaffPassword, removeStaff,
-  deleteAsset, deleteTask, promptNewPassword, MIN_PASSWORD_LENGTH,
+  deleteAsset, deleteTask, clearAllAssets, promptNewPassword, MIN_PASSWORD_LENGTH,
 } from './auth.js';
 import { setHook, callHook, modalSession } from './bridge.js';
 import {
@@ -583,6 +583,9 @@ function renderDashboard() {
 
 /* ── Assets ── */
 function renderAssets() {
+  const clearBtn = document.getElementById('clearAllAssetsBtn');
+  if (clearBtn) clearBtn.hidden = !isAdmin();
+
   const statusF = document.getElementById('assetFilterStatus').value;
   const typeF = document.getElementById('assetFilterType').value;
   const search = document.getElementById('globalSearch').value.toLowerCase();
@@ -894,6 +897,7 @@ async function importAssetsFromFile(file) {
 
 document.getElementById('downloadAssetTemplateBtn')?.addEventListener('click', downloadAssetTemplate);
 document.getElementById('exportAssetsBtn')?.addEventListener('click', exportAssetsToExcel);
+document.getElementById('clearAllAssetsBtn')?.addEventListener('click', clearAllAssets);
 document.getElementById('assetImportFile')?.addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
@@ -2931,6 +2935,7 @@ function renderActiveView() {
 
 
 window.deleteAsset = deleteAsset;
+window.clearAllAssets = clearAllAssets;
 window.deleteTask = deleteTask;
 window.changeMyPassword = changeMyPassword;
 window.resetStaffPassword = resetStaffPassword;
@@ -2958,6 +2963,7 @@ export function registerWindowActions() {
   // Most onclick handlers are assigned on window in this module's body.
   // Re-assert auth-sensitive ones here for a stable API surface.
   window.deleteAsset = deleteAsset;
+  window.clearAllAssets = clearAllAssets;
   window.deleteTask = deleteTask;
   window.changeMyPassword = changeMyPassword;
   window.resetStaffPassword = resetStaffPassword;
