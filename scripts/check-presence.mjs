@@ -46,4 +46,16 @@ assert.equal(assets.find((a) => a.tag === 'F').status, 'offline');
 assert.equal(assets.find((a) => a.tag === 'G').status, 'available');
 assert.equal(r.markedOffline, 2);
 assert.equal(r.markedActive, 1);
+
+function normalizeMac(value) {
+  return String(value || '').toLowerCase().replace(/[^a-f0-9]/g, '');
+}
+function matchByMac(assets, rowMac) {
+  const n = normalizeMac(rowMac);
+  return assets.find((a) => normalizeMac(a.macAddress) === n);
+}
+assert.equal(normalizeMac('AA:BB:CC:DD:EE:FF'), 'aabbccddeeff');
+assert.equal(matchByMac([{ macAddress: 'aa-bb-cc-dd-ee-ff' }], 'AA:BB:CC:DD:EE:FF').macAddress, 'aa-bb-cc-dd-ee-ff');
+assert.equal(matchByMac([{ macAddress: '111111111111' }], 'AA:BB:CC:DD:EE:FF'), undefined);
+
 console.log('check-presence: ok');

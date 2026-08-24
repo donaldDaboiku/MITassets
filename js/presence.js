@@ -19,6 +19,11 @@ export function isPresenceEnabled() {
   return !!state.settings.presenceEnabled;
 }
 
+/** Strip MAC to 12 hex chars for comparison (AA:BB:CC == aabbcc). */
+export function normalizeMac(value) {
+  return String(value || '').toLowerCase().replace(/[^a-f0-9]/g, '');
+}
+
 export function formatLastSeen(iso) {
   if (!iso) return 'Never';
   const t = new Date(iso).getTime();
@@ -108,12 +113,18 @@ export function applyHeartbeatsToAssets(rows, { save = true } = {}) {
     const lastSeen = row.last_seen || row.lastSeenAt || row.lastSeen;
     if (!lastSeen) return;
 
+    const rowMac = normalizeMac(row.mac_address || row.macAddress || '');
+    const agentAsMac = normalizeMac(agentId);
+
     const asset = state.assets.find((a) => {
       ensureAssetPresenceFields(a);
       if (agentId && a.agentId && a.agentId.toLowerCase() === agentId.toLowerCase()) return true;
       if (agentId && a.tag && a.tag.toLowerCase() === agentId.toLowerCase()) return true;
       if (tag && a.tag && a.tag.toLowerCase() === tag.toLowerCase()) return true;
       if (agentId && a.serial && a.serial.toLowerCase() === agentId.toLowerCase()) return true;
+      const assetMac = normalizeMac(a.macAddress);
+      if (rowMac.length === 12 && assetMac === rowMac) return true;
+      if (agentAsMac.length === 12 && assetMac === agentAsMac) return true;
       return false;
     });
     if (!asset) return;
@@ -123,7 +134,7 @@ export function applyHeartbeatsToAssets(rows, { save = true } = {}) {
     if (Number.isNaN(next) || next < prev) return;
 
     asset.lastSeenAt = new Date(lastSeen).toISOString();
-    if (agentId) asset.agentId = agentId;
+    if (agentId && !asset.agentId) asset.agentId = agentId;
     if (row.mac_address || row.macAddress) {
       asset.macAddress = row.mac_address || row.macAddress;
     }
