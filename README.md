@@ -45,10 +45,9 @@ The browser cannot scan your LAN. Laptops report in via a small agent that POSTs
 2. Deploy Edge Function `supabase/functions/heartbeat` and set secret `HEARTBEAT_SECRET` (same value as Settings → Network Presence).
 3. In the app: Settings → enable presence, set offline timeout (default 20 min), save shared secret (admin).
 4. On each device: run `agents/windows-heartbeat.ps1` (Task Scheduler every 5 min) or `agents/unix-heartbeat.sh` (cron). Set `agentId` to the asset tag.
-5. **On-site UniFi (UDM):** run `agents/unifi-heartbeat-poller.ps1` on one LAN host. Match assets by MAC. Details in `agents/UNIFI.md`.
-6. Dashboard shows Online / Offline counts and a stale list; Assets has a **Last seen** column.
+5. Dashboard shows Online / Offline counts and a stale list; Assets has a **Last seen** column.
 
-Agents use only the heartbeat secret — never staff passwords or the Supabase service role key. The UniFi API key stays on the poller host, not in the PWA.
+Agents use only the heartbeat secret — never staff passwords or the Supabase service role key.
 
 ## Default seed accounts (temporary)
 

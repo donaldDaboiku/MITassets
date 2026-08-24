@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=24">
+  <link rel="stylesheet" href="styles.css?v=25">
 </head>
 <body>
   <!-- Login -->
@@ -658,7 +658,7 @@
           </div>
           <div class="panel" id="presenceSettingsPanel">
             <h2>Network Presence</h2>
-            <p class="hint">Mark devices Active when a heartbeat arrives; Offline after the timeout. On-site Wi‑Fi: run <code>agents/unifi-heartbeat-poller.ps1</code> on a LAN host (UniFi API key stays off this app). Off-site laptops still need the per-PC agent in <code>agents/</code>.</p>
+            <p class="hint">Mark devices Active when a heartbeat arrives; Offline after the timeout. The browser cannot scan Wi‑Fi — use the per-laptop scripts in <code>agents/</code>.</p>
             <form id="presenceSettingsForm" class="form">
               <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
                 Enable presence monitoring
