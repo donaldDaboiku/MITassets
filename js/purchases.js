@@ -457,7 +457,7 @@ function renderPurchaseTable() {
   });
 
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty-state">No purchases yet. Log a purchase above.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="empty-state">No purchases yet. Log a purchase above.</td></tr>';
     return;
   }
 
@@ -476,6 +476,7 @@ function renderPurchaseTable() {
         <td>${esc(money(p.amount, p.currency || state.settings.itBudgetCurrency))}</td>
         <td>${esc(p.purpose || '—')}</td>
         <td>${esc(assetLabel(p.assetId))}</td>
+        <td>${esc(stockLabel(p.stockItemId))}</td>
         <td>${receipt}</td>
         <td>${esc(staffName(p.createdBy))}</td>
         <td>
