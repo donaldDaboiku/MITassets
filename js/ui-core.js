@@ -288,9 +288,13 @@ function advanceTaskStatus(taskId, newStatus, resolutionData) {
   if (newStatus === 'in-progress') task.startedAt = task.startedAt || new Date().toISOString();
   if (newStatus === 'resolved') {
     applyResolveTiming(task);
+    task.overdue = false;
     if (resolutionData) saveResolutionDoc(task, resolutionData);
   }
-  if (newStatus === 'closed') task.closedAt = new Date().toISOString();
+  if (newStatus === 'closed') {
+    task.closedAt = new Date().toISOString();
+    task.overdue = false;
+  }
 
   logAutomation('Status Change', `${task.title}: ${prev} → ${newStatus}`);
   saveState();
@@ -2399,6 +2403,7 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
       if (data.status === 'in-progress' && prevStatus === 'open') t.startedAt = new Date().toISOString();
       if (data.status === 'resolved' && prevStatus !== 'resolved') {
         applyResolveTiming(t);
+        t.overdue = false;
         if (data.resolutionNotes) {
           saveResolutionDoc(t, {
             whatWasDone: data.resolutionNotes,
@@ -2409,7 +2414,10 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
           });
         }
       }
-      if (data.status === 'closed' && prevStatus !== 'closed') t.closedAt = new Date().toISOString();
+      if (data.status === 'closed' && prevStatus !== 'closed') {
+        t.closedAt = new Date().toISOString();
+        t.overdue = false;
+      }
       if (state.automationRules.autoStartOnAssign && data.assignee && prevStatus === 'open' && data.status === 'open') {
         t.status = 'in-progress';
         t.startedAt = new Date().toISOString();
@@ -2456,6 +2464,7 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
     }
     const prev = task.status;
     task.status = 'resolved';
+    task.overdue = false;
     applyResolveTiming(task);
     commitModalAttachments(task);
     saveResolutionDoc(task, { ...data, attachments: task.attachments });
