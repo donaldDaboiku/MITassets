@@ -35,6 +35,7 @@ export function defaultState() {
     documentation: [],
     purchases: [],
     stockItems: [],
+    recurringTasks: [],
     settings: {
       appName: 'MIT Asset',
       tagline: 'IT Operations Hub',
@@ -88,6 +89,7 @@ export function loadState() {
         users: Array.isArray(parsed.users) ? parsed.users : [],
         purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
         stockItems: Array.isArray(parsed.stockItems) ? parsed.stockItems : [],
+        recurringTasks: Array.isArray(parsed.recurringTasks) ? parsed.recurringTasks : [],
         settings: { ...defaults.settings, ...(parsed.settings || {}) },
         automationRules: { ...defaults.automationRules, ...(parsed.automationRules || {}) },
       };

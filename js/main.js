@@ -31,6 +31,7 @@ import './reports-automation.js';
 import './storage-ui.js';
 import { registerPurchases } from './purchases.js';
 import { registerStaffScores } from './staff-scores.js';
+import { registerRecurringTasks } from './recurring-tasks.js';
 import { toast } from './utils.js';
 
 // Side-effect: ui-core registers DOM listeners on import
@@ -43,6 +44,7 @@ registerUiHooks();
 registerWindowActions();
 registerPurchases();
 registerStaffScores();
+registerRecurringTasks();
 setHook('updateLoggedInUI', updateLoggedInUI);
 
 async function boot() {
@@ -75,7 +77,7 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=31').then((reg) => {
+    navigator.serviceWorker.register('./sw.js?v=32').then((reg) => {
       reg.update();
     }).catch(() => {});
   }

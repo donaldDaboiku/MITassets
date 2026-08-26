@@ -25,6 +25,8 @@ export const hooks = {
   renderStaffScores: null,
   buildStaffScoresReport: null,
   syncAdminNav: null,
+  renderRecurringTasks: null,
+  spawnRecurringTasks: null,
 };
 
 /** Mutable bag shared across modal forms (attachments in progress). */

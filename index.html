@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=31">
+  <link rel="stylesheet" href="styles.css?v=32">
 </head>
 <body>
   <!-- Login -->
@@ -297,6 +297,70 @@
             <option value="critical">Critical</option>
           </select>
           <span class="hint" id="taskDateSummary" style="margin:0"></span>
+        </div>
+        <div class="panel" style="margin-bottom:1.5rem">
+          <h2>Recurring tasks</h2>
+          <p class="hint">IT staff set templates as <strong>Daily (Mon–Fri)</strong>, <strong>Weekly</strong>, or <strong>Monthly</strong>. Matching open tasks are created automatically (and when you open the app / run automation).</p>
+          <div id="recurringTasksList" class="list-mini" style="margin:0.75rem 0"></div>
+          <form id="recurringTaskForm" class="form">
+            <label>Title *
+              <input type="text" name="title" required placeholder="e.g. Check backup jobs / Weekly patch review" />
+            </label>
+            <label>Repeat
+              <select name="recurrence">
+                <option value="daily">Daily (Mon–Friday)</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </label>
+            <label data-rec-extra="weekly" hidden>Weekday
+              <select name="weekday">
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+              </select>
+            </label>
+            <label data-rec-extra="monthly" hidden>Day of month (1–28)
+              <input type="number" name="dayOfMonth" min="1" max="28" value="1" />
+            </label>
+            <label>Priority
+              <select name="priority">
+                <option value="low">low</option>
+                <option value="medium" selected>medium</option>
+                <option value="high">high</option>
+                <option value="critical">critical</option>
+              </select>
+            </label>
+            <label>Category
+              <select name="category">
+                <option value="maintenance">maintenance</option>
+                <option value="hardware">hardware</option>
+                <option value="software">software</option>
+                <option value="network">network</option>
+                <option value="security">security</option>
+                <option value="other" selected>other</option>
+              </select>
+            </label>
+            <label>Assign to
+              <select name="assignee">
+                <option value="">Unassigned</option>
+              </select>
+            </label>
+            <label>Linked asset (optional)
+              <select name="linkedAssetId">
+                <option value="">None</option>
+              </select>
+            </label>
+            <label>Description
+              <textarea name="description" rows="2" placeholder="What should be done each time…"></textarea>
+            </label>
+            <div class="workflow-btns">
+              <button type="submit" class="btn btn-primary">Add recurring template</button>
+              <button type="button" class="btn btn-secondary" id="spawnRecurringBtn">Create due tasks now</button>
+            </div>
+          </form>
         </div>
         <div class="table-wrap">
           <table>
