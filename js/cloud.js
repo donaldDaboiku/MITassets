@@ -6,6 +6,7 @@ import {
 import { setHook, callHook } from './bridge.js';
 
 const CLOUD_SYNC_DELAY_MS = 1500;
+const CLOUD_FETCH_TIMEOUT_MS = 20000;
 let cloudSyncTimer = null;
 let cloudBusy = false;
 export let lastCloudPushAt = null;
@@ -17,8 +18,31 @@ export function cloudConfigured() {
   return !!(s.cloudEnabled && s.supabaseUrl && s.supabaseAnonKey && s.workspaceId);
 }
 
+/** Restore timestamps from persisted settings (module vars reset on reload). */
+function hydrateCloudTimestamps() {
+  const s = state.settings || {};
+  if (!lastCloudPushAt && s.lastCloudPushAt) lastCloudPushAt = s.lastCloudPushAt;
+  if (!lastCloudPullAt && s.lastCloudPullAt) lastCloudPullAt = s.lastCloudPullAt;
+}
+
+function rememberPushAt(iso) {
+  lastCloudPushAt = iso;
+  state.settings.lastCloudPushAt = iso;
+}
+
+function rememberPullAt(iso) {
+  lastCloudPullAt = iso;
+  state.settings.lastCloudPullAt = iso;
+}
+
+function persistCloudMetaLocally() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (_) {}
+}
+
 function cloudHeaders() {
-  const key = state.settings.supabaseAnonKey.trim();
+  const key = String(state.settings.supabaseAnonKey || '').trim();
   return {
     apikey: key,
     Authorization: `Bearer ${key}`,
@@ -28,7 +52,7 @@ function cloudHeaders() {
 }
 
 function cloudBaseUrl() {
-  return state.settings.supabaseUrl.replace(/\/$/, '');
+  return String(state.settings.supabaseUrl || '').replace(/\/$/, '').trim();
 }
 
 function cloudWorkspaceId() {
@@ -42,17 +66,53 @@ function setCloudStatus(text, isError = false) {
   el.classList.toggle('cloud-error', isError);
 }
 
+async function cloudFetch(url, options = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), CLOUD_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`Timed out after ${CLOUD_FETCH_TIMEOUT_MS / 1000}s — check URL / network`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function friendlyCloudError(err, statusText = '') {
+  const msg = String(err?.message || err || statusText || 'Unknown error');
+  if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) {
+    return 'Network/CORS failed — check Supabase URL and that the project is running';
+  }
+  if (/JWT|Invalid API key|apikey/i.test(msg)) {
+    return 'Invalid anon key — paste the Project anon public key from Supabase Settings → API';
+  }
+  if (/relation .* does not exist|mit_workspace/i.test(msg)) {
+    return 'Table missing — run supabase-setup.sql in the Supabase SQL editor';
+  }
+  if (/permission denied|RLS|row-level security/i.test(msg)) {
+    return 'Permission denied — re-run supabase-setup.sql (RLS policies)';
+  }
+  return msg.length > 180 ? `${msg.slice(0, 180)}…` : msg;
+}
+
 export async function pullFromCloud({ silent = false } = {}) {
   if (!cloudConfigured()) {
     if (!silent) toast('Enable cloud sync in Settings first');
     return null;
   }
-  if (cloudBusy) return null;
+  if (cloudBusy) {
+    if (!silent) toast('Cloud sync already in progress…');
+    return null;
+  }
   cloudBusy = true;
   setCloudStatus('Pulling from cloud…');
+  renderCloudPanel();
   try {
     const id = encodeURIComponent(cloudWorkspaceId());
-    const res = await fetch(
+    const res = await cloudFetch(
       `${cloudBaseUrl()}/rest/v1/mit_workspace?workspace_id=eq.${id}&select=payload,updated_at`,
       { headers: cloudHeaders() }
     );
@@ -61,20 +121,21 @@ export async function pullFromCloud({ silent = false } = {}) {
       throw new Error(errText || `HTTP ${res.status}`);
     }
     const rows = await res.json();
-    lastCloudPullAt = new Date().toISOString();
+    rememberPullAt(new Date().toISOString());
     lastCloudError = null;
+    persistCloudMetaLocally();
     if (!rows.length) {
-      setCloudStatus('Cloud workspace empty — push to create backup');
+      setCloudStatus('Cloud workspace empty — click Push to Cloud to create the first backup');
       if (!silent) toast('No cloud data yet — click Push to Cloud');
       return null;
     }
     setCloudStatus(`Cloud ready · last updated ${new Date(rows[0].updated_at).toLocaleString()}`);
-    if (!silent) toast('Cloud data loaded');
+    if (!silent) toast('Cloud data checked');
     return rows[0];
   } catch (err) {
-    lastCloudError = err.message || String(err);
+    lastCloudError = friendlyCloudError(err);
     setCloudStatus(`Cloud error: ${lastCloudError}`, true);
-    if (!silent) toast('Cloud pull failed — check Settings');
+    if (!silent) toast('Cloud pull failed — see status under Cloud Storage');
     return null;
   } finally {
     cloudBusy = false;
@@ -87,9 +148,13 @@ export async function pushToCloud({ silent = false } = {}) {
     if (!silent) toast('Enable cloud sync in Settings first');
     return false;
   }
-  if (cloudBusy) return false;
+  if (cloudBusy) {
+    if (!silent) toast('Cloud sync already in progress…');
+    return false;
+  }
   cloudBusy = true;
   setCloudStatus('Pushing to cloud…');
+  renderCloudPanel();
   try {
     const payload = JSON.parse(JSON.stringify(state));
     const body = {
@@ -97,7 +162,7 @@ export async function pushToCloud({ silent = false } = {}) {
       payload,
       updated_at: new Date().toISOString(),
     };
-    const res = await fetch(`${cloudBaseUrl()}/rest/v1/mit_workspace`, {
+    const res = await cloudFetch(`${cloudBaseUrl()}/rest/v1/mit_workspace`, {
       method: 'POST',
       headers: {
         ...cloudHeaders(),
@@ -109,19 +174,16 @@ export async function pushToCloud({ silent = false } = {}) {
       const errText = await res.text();
       throw new Error(errText || `HTTP ${res.status}`);
     }
-    lastCloudPushAt = new Date().toISOString();
-    state.settings.lastCloudPushAt = lastCloudPushAt;
+    rememberPushAt(new Date().toISOString());
     lastCloudError = null;
     setCloudStatus(`Synced to cloud · ${new Date(lastCloudPushAt).toLocaleString()}`);
+    persistCloudMetaLocally();
     if (!silent) toast('Saved to cloud');
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (_) {}
     return true;
   } catch (err) {
-    lastCloudError = err.message || String(err);
+    lastCloudError = friendlyCloudError(err);
     setCloudStatus(`Cloud error: ${lastCloudError}`, true);
-    if (!silent) toast('Cloud push failed — check Settings');
+    if (!silent) toast('Cloud push failed — see status under Cloud Storage');
     return false;
   } finally {
     cloudBusy = false;
@@ -154,16 +216,21 @@ export function applyCloudPayload(payload) {
   next.settings.supabaseAnonKey = cur.supabaseAnonKey || next.settings.supabaseAnonKey || '';
   next.settings.workspaceId = cur.workspaceId || next.settings.workspaceId || 'main';
   next.settings.autoSyncCloud = cur.autoSyncCloud ?? next.settings.autoSyncCloud ?? true;
+  // Keep local sync timestamps — cloud payload must not wipe them to null.
+  next.settings.lastCloudPushAt = cur.lastCloudPushAt || next.settings.lastCloudPushAt || null;
+  next.settings.lastCloudPullAt = cur.lastCloudPullAt || next.settings.lastCloudPullAt || null;
 
   applyState(next);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (_) {}
   return true;
 }
 
 export async function restoreFromCloud() {
   const row = await pullFromCloud({ silent: true });
   if (!row?.payload) {
-    toast('Nothing to restore from cloud');
+    toast(lastCloudError ? `Nothing to restore — ${lastCloudError}` : 'Nothing to restore from cloud');
     return;
   }
   if (!confirm('Replace local data with the cloud backup? This cannot be undone locally.')) return;
@@ -178,12 +245,17 @@ export async function restoreFromCloud() {
 }
 
 export async function syncOnBoot() {
+  hydrateCloudTimestamps();
   if (!cloudConfigured()) {
     setCloudStatus('Cloud sync off — configure in Settings');
+    renderCloudPanel();
     return;
   }
   const row = await pullFromCloud({ silent: true });
-  if (!row?.payload) return;
+  if (!row?.payload) {
+    renderCloudPanel();
+    return;
+  }
 
   const cloudTime = new Date(row.updated_at).getTime();
   const localTime = state.lastSaved ? new Date(state.lastSaved).getTime() : 0;
@@ -191,9 +263,12 @@ export async function syncOnBoot() {
 
   if (localEmpty && row.payload) {
     applyCloudPayload(row.payload);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (_) {}
     setCloudStatus(`Restored empty local from cloud · ${new Date(row.updated_at).toLocaleString()}`);
     try { await pullHeartbeats({ silent: true }); } catch (_) {}
+    renderCloudPanel();
     return;
   }
 
@@ -203,22 +278,28 @@ export async function syncOnBoot() {
     setCloudStatus('Cloud OK · local is current');
   }
   try { await pullHeartbeats({ silent: true }); } catch (_) {}
+  renderCloudPanel();
 }
 
 export function renderCloudPanel() {
+  hydrateCloudTimestamps();
   const status = document.getElementById('cloudStatus');
   const meta = document.getElementById('cloudMeta');
+  const pushAt = lastCloudPushAt || state.settings?.lastCloudPushAt || null;
+  const pullAt = lastCloudPullAt || state.settings?.lastCloudPullAt || null;
   if (meta) {
     meta.innerHTML = `
       <div class="storage-stat"><span>Cloud enabled</span><strong>${cloudConfigured() ? 'Yes' : 'No'}</strong></div>
       <div class="storage-stat"><span>Auto-sync</span><strong>${state.settings.autoSyncCloud ? 'On' : 'Off'}</strong></div>
-      <div class="storage-stat"><span>Last push</span><strong>${lastCloudPushAt ? new Date(lastCloudPushAt).toLocaleString() : '—'}</strong></div>
-      <div class="storage-stat"><span>Last pull</span><strong>${lastCloudPullAt ? new Date(lastCloudPullAt).toLocaleString() : '—'}</strong></div>
+      <div class="storage-stat"><span>Last push</span><strong>${pushAt ? new Date(pushAt).toLocaleString() : '—'}</strong></div>
+      <div class="storage-stat"><span>Last pull</span><strong>${pullAt ? new Date(pullAt).toLocaleString() : '—'}</strong></div>
     `;
   }
   if (status && !cloudConfigured()) {
     status.textContent = 'Cloud sync off — configure in Settings';
     status.classList.remove('cloud-error');
+  } else if (status && lastCloudError && !cloudBusy && !status.textContent.startsWith('Cloud error')) {
+    // leave an existing success status; error path already set text
   }
 }
 
@@ -227,6 +308,7 @@ export function registerCloudHooks() {
   setHook('scheduleCloudPush', scheduleCloudPush);
   setHook('renderCloudPanel', renderCloudPanel);
   setHook('pullHeartbeats', pullHeartbeats);
+  hydrateCloudTimestamps();
 }
 
 /**
@@ -239,7 +321,7 @@ export async function pullHeartbeats({ silent = false } = {}) {
   }
   try {
     const id = encodeURIComponent(cloudWorkspaceId());
-    const res = await fetch(
+    const res = await cloudFetch(
       `${cloudBaseUrl()}/rest/v1/mit_heartbeats?workspace_id=eq.${id}&select=agent_id,asset_tag,hostname,mac_address,last_seen,meta&order=last_seen.desc`,
       { headers: cloudHeaders() }
     );

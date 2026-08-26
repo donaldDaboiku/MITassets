@@ -60,6 +60,7 @@ export function defaultState() {
       autoSyncCloud: true,
       lastExportAt: null,
       lastCloudPushAt: null,
+      lastCloudPullAt: null,
       presenceEnabled: false,
       offlineAfterMinutes: 20,
       heartbeatSecret: '',

@@ -75,7 +75,7 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=30').then((reg) => {
+    navigator.serviceWorker.register('./sw.js?v=31').then((reg) => {
       reg.update();
     }).catch(() => {});
   }
