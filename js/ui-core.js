@@ -1904,6 +1904,7 @@ function renderStorage() {
     <div class="storage-stat"><span>Assignment records</span><strong>${state.assignmentHistory.length}</strong></div>
     <div class="storage-stat"><span>Documentation entries</span><strong>${state.documentation.length}</strong></div>
     <div class="storage-stat"><span>Purchases</span><strong>${(state.purchases || []).length}</strong></div>
+    <div class="storage-stat"><span>Stock SKUs</span><strong>${(state.stockItems || []).length}</strong></div>
     <div class="storage-stat"><span>Storage used</span><strong>${sizeKB} KB</strong></div>
     <div class="storage-stat"><span>Last saved</span><strong>${state.lastSaved ? new Date(state.lastSaved).toLocaleString() : 'Never'}</strong></div>
   `;
@@ -2217,6 +2218,7 @@ document.getElementById('importFile').addEventListener('change', (e) => {
         ...imported,
         users: Array.isArray(imported.users) ? imported.users : [],
         purchases: Array.isArray(imported.purchases) ? imported.purchases : [],
+        stockItems: Array.isArray(imported.stockItems) ? imported.stockItems : [],
         settings: { ...defaults.settings, ...(imported.settings || {}) },
         automationRules: { ...defaults.automationRules, ...(imported.automationRules || {}) },
       };

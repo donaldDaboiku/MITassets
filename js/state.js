@@ -34,6 +34,7 @@ export function defaultState() {
     automationLog: [],
     documentation: [],
     purchases: [],
+    stockItems: [],
     settings: {
       appName: 'MIT Asset',
       tagline: 'IT Operations Hub',
@@ -63,9 +64,11 @@ export function defaultState() {
       offlineAfterMinutes: 20,
       heartbeatSecret: '',
       itBudgetAmount: 0,
+      itBudgetSupplementary: 0,
       itBudgetCurrency: 'NGN',
       itBudgetPeriod: 'month',
       itBudgetNotes: '',
+      itBudgetSupplementaryNotes: '',
     },
     lastSaved: null,
     authVersion: 0,
@@ -83,6 +86,7 @@ export function loadState() {
         ...parsed,
         users: Array.isArray(parsed.users) ? parsed.users : [],
         purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
+        stockItems: Array.isArray(parsed.stockItems) ? parsed.stockItems : [],
         settings: { ...defaults.settings, ...(parsed.settings || {}) },
         automationRules: { ...defaults.automationRules, ...(parsed.automationRules || {}) },
       };

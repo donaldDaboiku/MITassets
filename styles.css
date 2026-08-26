@@ -936,6 +936,17 @@ textarea {
   background: var(--danger, #ef4444);
 }
 
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.warn-text {
+  color: var(--danger, #ef4444);
+  font-weight: 600;
+}
+
 /* Toggle list */
 .toggle-list {
   display: flex;

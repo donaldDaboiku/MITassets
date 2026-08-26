@@ -144,6 +144,7 @@ export function applyCloudPayload(payload) {
     ...defaults,
     ...payload,
     purchases: Array.isArray(payload.purchases) ? payload.purchases : [],
+    stockItems: Array.isArray(payload.stockItems) ? payload.stockItems : [],
     settings: { ...defaults.settings, ...(payload.settings || {}) },
     automationRules: { ...defaults.automationRules, ...(payload.automationRules || {}) },
   };

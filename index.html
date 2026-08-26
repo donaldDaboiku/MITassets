@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=28">
+  <link rel="stylesheet" href="styles.css?v=29">
 </head>
 <body>
   <!-- Login -->
@@ -439,12 +439,21 @@
             <p class="hint">Record goods bought for IT — vendor, amount, purpose, linked asset, and receipt.</p>
             <form id="purchaseForm" class="form">
               <label>Item / goods *
-                <input type="text" name="itemName" required placeholder="e.g. Dell USB-C dock" />
+                <input type="text" name="itemName" required placeholder="e.g. USB flash drive 32GB" list="stockItemNameList" />
+                <datalist id="stockItemNameList"></datalist>
               </label>
               <label>Vendor
                 <input type="text" name="vendor" placeholder="e.g. Jumia / local supplier" />
               </label>
-              <label>Amount *
+              <div class="form-row-2">
+                <label>Qty *
+                  <input type="number" name="quantity" min="1" step="1" value="1" required />
+                </label>
+                <label>Unit
+                  <input type="text" name="unit" placeholder="pcs" value="pcs" />
+                </label>
+              </div>
+              <label>Total amount *
                 <input type="number" name="amount" min="0" step="0.01" required placeholder="0.00" />
               </label>
               <label>Date &amp; time purchased *
@@ -465,8 +474,18 @@
               </label>
               <label>Linked asset (optional)
                 <select name="assetId" id="purchaseAssetSelect">
-                  <option value="">None / general IT stock</option>
+                  <option value="">None — general / stock purchase</option>
                 </select>
+                <span class="hint-inline">Link when this buy is for a specific device</span>
+              </label>
+              <label>IT stock item (optional)
+                <select name="stockItemId" id="purchaseStockSelect">
+                  <option value="">—</option>
+                </select>
+              </label>
+              <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+                Add qty to IT stock after save
+                <input type="checkbox" name="addToStock" id="purchaseAddToStock" checked />
               </label>
               <label>Notes
                 <textarea name="notes" rows="2" placeholder="PO #, ticket, warranty…"></textarea>
@@ -486,8 +505,12 @@
             <h2>IT budget (admin)</h2>
             <p class="hint" id="purchaseBudgetAdminHint" hidden>Only administrators can change the budget and currency.</p>
             <form id="purchaseBudgetForm" class="form">
-              <label>Budget amount
+              <label>Main budget
                 <input type="number" name="itBudgetAmount" min="0" step="0.01" value="0" />
+              </label>
+              <label>Supplementary budget
+                <input type="number" name="itBudgetSupplementary" min="0" step="0.01" value="0" />
+                <span class="hint-inline">Extra / contingency on top of main budget</span>
               </label>
               <label>Currency
                 <select name="itBudgetCurrency">
@@ -507,11 +530,43 @@
                   <option value="all">All time</option>
                 </select>
               </label>
-              <label>Notes
+              <label>Main budget notes
                 <textarea name="itBudgetNotes" rows="2" placeholder="e.g. FY26 IT capex approved…"></textarea>
+              </label>
+              <label>Supplementary notes
+                <textarea name="itBudgetSupplementaryNotes" rows="2" placeholder="e.g. Emergency contingency / project X top-up…"></textarea>
               </label>
               <button type="submit" class="btn btn-primary">Save budget</button>
             </form>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:1.5rem">
+          <h2>IT stock (consumables)</h2>
+          <p class="hint">Track flash drives, mice, cables, and other spares. Purchases can top up stock; issue items when handed out.</p>
+          <form id="stockItemForm" class="form form-inline">
+            <input type="text" name="name" placeholder="Item name (e.g. Mouse)" required />
+            <input type="number" name="quantity" min="0" step="1" value="0" placeholder="Qty" title="Starting quantity" />
+            <input type="text" name="unit" placeholder="pcs" value="pcs" style="max-width:5rem" />
+            <select name="category">
+              <option value="accessory">Accessory</option>
+              <option value="consumable">Consumable</option>
+              <option value="hardware">Hardware</option>
+              <option value="other">Other</option>
+            </select>
+            <button type="submit" class="btn btn-primary">Add stock item</button>
+          </form>
+          <div class="table-wrap" style="margin-top:1rem">
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>On hand</th>
+                  <th>Category</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="stockItemsTable"></tbody>
+            </table>
           </div>
         </div>
         <div class="panel" style="margin-top:1.5rem">
@@ -527,6 +582,7 @@
                 <tr>
                   <th>Date / time</th>
                   <th>Item</th>
+                  <th>Qty</th>
                   <th>Vendor</th>
                   <th>Amount</th>
                   <th>Purpose</th>
