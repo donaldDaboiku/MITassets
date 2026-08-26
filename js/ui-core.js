@@ -450,6 +450,7 @@ const titles = {
   assignments: 'Assign & Reassign',
   purchases: 'IT Purchases',
   reports: 'Generate Reports',
+  scores: 'Staff Score Sheet',
   automation: 'IT Automation',
   storage: 'Storage & Backup',
   settings: 'Settings',
@@ -1565,6 +1566,11 @@ document.getElementById('reportForm').addEventListener('submit', (e) => {
   const to = fd.get('dateTo');
   const format = fd.get('format');
 
+  if (type === 'scores' && !isAdmin()) {
+    toast('Only administrators can generate the staff score sheet');
+    return;
+  }
+
   const data = buildReport(type, from, to);
 
   if (format === 'csv') {
@@ -1644,6 +1650,19 @@ function buildReport(type, from, to) {
         html = purchaseReport.html;
       } else {
         html += purchaseReport.html;
+      }
+    }
+  }
+
+  if (type === 'scores' || type === 'full') {
+    const scoreReport = callHook('buildStaffScoresReport', from, to);
+    if (scoreReport) {
+      if (type !== 'full') {
+        title = scoreReport.title;
+        rows = scoreReport.rows;
+        html = scoreReport.html;
+      } else {
+        html += scoreReport.html;
       }
     }
   }
@@ -3212,6 +3231,7 @@ document.getElementById('testEmailBtn')?.addEventListener('click', async () => {
 function renderAll() {
   applyBranding();
   updateLoggedInUI();
+  callHook('syncAdminNav');
   renderActiveView();
   updateNotifBadges();
 }
@@ -3224,6 +3244,7 @@ const VIEW_RENDERERS = {
   documentation: () => renderDocumentation(),
   assignments: () => { populateAssignSelects(); renderAssignmentHistory(); },
   purchases: () => callHook('renderPurchases'),
+  scores: () => callHook('renderStaffScores'),
   automation: () => renderAutomation(),
   storage: () => renderStorage(),
   settings: () => renderSettings(),

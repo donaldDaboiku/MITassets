@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=29">
+  <link rel="stylesheet" href="styles.css?v=30">
 </head>
 <body>
   <!-- Login -->
@@ -59,6 +59,7 @@
         <button class="nav-btn" data-view="assignments">Assignments</button>
         <button class="nav-btn" data-view="purchases">Purchases</button>
         <button class="nav-btn" data-view="reports">Reports</button>
+        <button class="nav-btn" data-view="scores" hidden>Staff scores</button>
         <button class="nav-btn" data-view="automation">Automation</button>
         <button class="nav-btn" data-view="storage">Storage</button>
         <button class="nav-btn" data-view="settings">Settings</button>
@@ -611,6 +612,7 @@
                 <option value="tasks">Task Log Summary</option>
                 <option value="assignments">Assignment History</option>
                 <option value="purchases">IT Purchases &amp; Spend</option>
+                <option value="scores">IT Staff Score Sheet</option>
                 <option value="maintenance">Maintenance Schedule</option>
                 <option value="documentation">Resolution Documentation</option>
                 <option value="full">Full IT Operations Report</option>
@@ -641,6 +643,53 @@
             <button class="btn btn-ghost" id="closeReportBtn">Close</button>
           </div>
           <div id="reportOutput" class="report-output"></div>
+        </div>
+      </section>
+
+      <!-- Staff scores (admin) -->
+      <section class="view" id="view-scores">
+        <div class="panel" id="scoresAdminGate" hidden>
+          <p class="hint">Only administrators can view the IT staff score sheet.</p>
+        </div>
+        <div id="scoresAdminBody">
+          <div class="panel">
+            <h2>IT staff score sheet</h2>
+            <p class="hint">Scored from work in MIT Asset: tasks resolved/closed, resolution docs, purchases logged, devices owned, minus overdue open tasks. Date filter applies to resolved / closed / docs / purchases. Open, overdue, and assets owned are current.</p>
+            <p class="hint"><strong>Points:</strong> resolved ×10 · closed ×3 · documented ×5 · critical resolved ×5 · purchases ×2 · assets owned ×1 · overdue open −8 (minimum 0). <strong>Grade:</strong> A ≥80 · B ≥55 · C ≥30 · D ≥15 · E below.</p>
+            <div class="toolbar" style="margin:1rem 0 0;padding:0;border:0;flex-wrap:wrap;gap:0.5rem">
+              <label class="filter-label">From <input type="date" id="scoreFilterFrom" /></label>
+              <label class="filter-label">To <input type="date" id="scoreFilterTo" /></label>
+              <button type="button" class="btn btn-secondary" id="scoreFilterMonthBtn">This month</button>
+              <button type="button" class="btn btn-ghost" id="scoreFilterAllBtn">All dates</button>
+              <button type="button" class="btn btn-secondary" id="scoreExportBtn">Export CSV</button>
+              <button type="button" class="btn btn-primary" id="scorePrintBtn">Print</button>
+            </div>
+          </div>
+          <div class="panel" style="margin-top:1.5rem">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Grade</th>
+                    <th>Score</th>
+                    <th>Open</th>
+                    <th>Overdue</th>
+                    <th>Resolved</th>
+                    <th>Closed</th>
+                    <th>Docs</th>
+                    <th>Critical</th>
+                    <th>Purchases</th>
+                    <th>Assets</th>
+                    <th>Avg TTR</th>
+                  </tr>
+                </thead>
+                <tbody id="staffScoresTable"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
 

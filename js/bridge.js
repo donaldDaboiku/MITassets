@@ -22,6 +22,9 @@ export const hooks = {
   wireAssetTagField: null,
   renderPurchases: null,
   buildPurchasesReport: null,
+  renderStaffScores: null,
+  buildStaffScoresReport: null,
+  syncAdminNav: null,
 };
 
 /** Mutable bag shared across modal forms (attachments in progress). */
