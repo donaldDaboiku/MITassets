@@ -932,6 +932,10 @@ textarea {
   transition: width 0.3s;
 }
 
+.bar-fill-warn {
+  background: var(--danger, #ef4444);
+}
+
 /* Toggle list */
 .toggle-list {
   display: flex;

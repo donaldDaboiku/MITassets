@@ -1,0 +1,21 @@
+{
+  "name": "mitassest",
+  "version": "1.0.0",
+  "description": "MIT Asset — IT Operations Hub: local-first PWA for IT asset management, task logs, assignments, automation, and optional Supabase cloud backup.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/donaldDaboiku/MITassets.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/donaldDaboiku/MITassets/issues"
+  },
+  "homepage": "https://github.com/donaldDaboiku/MITassets#readme"
+}

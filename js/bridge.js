@@ -20,6 +20,8 @@ export const hooks = {
   wireTaskAttachments: null,
   wireTaskLinkedAssetCategory: null,
   wireAssetTagField: null,
+  renderPurchases: null,
+  buildPurchasesReport: null,
 };
 
 /** Mutable bag shared across modal forms (attachments in progress). */

@@ -448,6 +448,7 @@ const titles = {
   tasks: 'Task Logs',
   documentation: 'Documentation',
   assignments: 'Assign & Reassign',
+  purchases: 'IT Purchases',
   reports: 'Generate Reports',
   automation: 'IT Automation',
   storage: 'Storage & Backup',
@@ -1634,6 +1635,19 @@ function buildReport(type, from, to) {
     if (type === 'assignments') { rows = histRows; title = 'Assignment History Report'; }
   }
 
+  if (type === 'purchases' || type === 'full') {
+    const purchaseReport = callHook('buildPurchasesReport', from, to);
+    if (purchaseReport) {
+      if (type !== 'full') {
+        title = purchaseReport.title;
+        rows = purchaseReport.rows;
+        html = purchaseReport.html;
+      } else {
+        html += purchaseReport.html;
+      }
+    }
+  }
+
   if (type === 'maintenance') {
     title = 'Maintenance Schedule';
     const items = state.assets.filter((a) => a.nextMaintenance).sort((a, b) => a.nextMaintenance.localeCompare(b.nextMaintenance));
@@ -1665,7 +1679,13 @@ function buildReport(type, from, to) {
   }
 
   if (type === 'full') {
-    rows = [['Section', 'Count'], ['Assets', state.assets.length], ['Tasks', state.tasks.length], ['Staff', state.staff.length]];
+    rows = [
+      ['Section', 'Count'],
+      ['Assets', state.assets.length],
+      ['Tasks', state.tasks.length],
+      ['Purchases', (state.purchases || []).length],
+      ['Staff', state.staff.length],
+    ];
   }
 
   return { title, rows, html, filename: `${type}-report-${Date.now()}.csv` };
@@ -1883,6 +1903,7 @@ function renderStorage() {
     <div class="storage-stat"><span>Device Users</span><strong>${(state.users || []).length}</strong></div>
     <div class="storage-stat"><span>Assignment records</span><strong>${state.assignmentHistory.length}</strong></div>
     <div class="storage-stat"><span>Documentation entries</span><strong>${state.documentation.length}</strong></div>
+    <div class="storage-stat"><span>Purchases</span><strong>${(state.purchases || []).length}</strong></div>
     <div class="storage-stat"><span>Storage used</span><strong>${sizeKB} KB</strong></div>
     <div class="storage-stat"><span>Last saved</span><strong>${state.lastSaved ? new Date(state.lastSaved).toLocaleString() : 'Never'}</strong></div>
   `;
@@ -2195,6 +2216,7 @@ document.getElementById('importFile').addEventListener('change', (e) => {
         ...defaults,
         ...imported,
         users: Array.isArray(imported.users) ? imported.users : [],
+        purchases: Array.isArray(imported.purchases) ? imported.purchases : [],
         settings: { ...defaults.settings, ...(imported.settings || {}) },
         automationRules: { ...defaults.automationRules, ...(imported.automationRules || {}) },
       };
@@ -2461,6 +2483,7 @@ const runGlobalSearch = debounce(() => {
   if (view === 'assets') renderAssets();
   else if (view === 'tasks') renderTasks();
   else if (view === 'documentation') renderDocumentation();
+  else if (view === 'purchases') callHook('renderPurchases');
   else renderActiveView();
 }, 160);
 
@@ -3198,6 +3221,7 @@ const VIEW_RENDERERS = {
   tasks: () => renderTasks(),
   documentation: () => renderDocumentation(),
   assignments: () => { populateAssignSelects(); renderAssignmentHistory(); },
+  purchases: () => callHook('renderPurchases'),
   automation: () => renderAutomation(),
   storage: () => renderStorage(),
   settings: () => renderSettings(),

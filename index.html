@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=27">
+  <link rel="stylesheet" href="styles.css?v=28">
 </head>
 <body>
   <!-- Login -->
@@ -57,6 +57,7 @@
         <button class="nav-btn" data-view="tasks">Task Logs</button>
         <button class="nav-btn" data-view="documentation">Documentation</button>
         <button class="nav-btn" data-view="assignments">Assignments</button>
+        <button class="nav-btn" data-view="purchases">Purchases</button>
         <button class="nav-btn" data-view="reports">Reports</button>
         <button class="nav-btn" data-view="automation">Automation</button>
         <button class="nav-btn" data-view="storage">Storage</button>
@@ -408,6 +409,139 @@
         </div>
       </section>
 
+      <!-- Purchases -->
+      <section class="view" id="view-purchases">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">Spent (period)</span>
+            <span class="stat-value" id="purchaseStatSpent">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Budget</span>
+            <span class="stat-value" id="purchaseStatBudget">Not set</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Remaining</span>
+            <span class="stat-value" id="purchaseStatRemaining">—</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Purchases (period)</span>
+            <span class="stat-value" id="purchaseStatCount">0</span>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:1rem">
+          <div id="purchaseBudgetBar"></div>
+          <p class="hint" id="purchaseBudgetNote" style="margin-top:0.75rem"></p>
+        </div>
+        <div class="panel-grid" style="margin-top:1.5rem">
+          <div class="panel">
+            <h2 id="purchaseFormTitle">Log IT purchase</h2>
+            <p class="hint">Record goods bought for IT — vendor, amount, purpose, linked asset, and receipt.</p>
+            <form id="purchaseForm" class="form">
+              <label>Item / goods *
+                <input type="text" name="itemName" required placeholder="e.g. Dell USB-C dock" />
+              </label>
+              <label>Vendor
+                <input type="text" name="vendor" placeholder="e.g. Jumia / local supplier" />
+              </label>
+              <label>Amount *
+                <input type="number" name="amount" min="0" step="0.01" required placeholder="0.00" />
+              </label>
+              <label>Date &amp; time purchased *
+                <input type="datetime-local" name="purchasedAt" required />
+              </label>
+              <label>Category
+                <select name="category">
+                  <option value="hardware">Hardware</option>
+                  <option value="software">Software / license</option>
+                  <option value="consumable">Consumable</option>
+                  <option value="accessory">Accessory</option>
+                  <option value="service">Service / repair part</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>Purpose / what for *
+                <input type="text" name="purpose" required placeholder="e.g. Replace failed dock for finance laptop" />
+              </label>
+              <label>Linked asset (optional)
+                <select name="assetId" id="purchaseAssetSelect">
+                  <option value="">None / general IT stock</option>
+                </select>
+              </label>
+              <label>Notes
+                <textarea name="notes" rows="2" placeholder="PO #, ticket, warranty…"></textarea>
+              </label>
+              <label>Vendor receipt
+                <input type="file" id="purchaseReceiptInput" accept="image/*,.pdf" />
+                <span class="hint-inline">Photo or PDF · images compressed · keep under ~1.5 MB</span>
+              </label>
+              <div id="purchaseReceiptPreview" class="attach-list"></div>
+              <div class="workflow-btns">
+                <button type="submit" class="btn btn-primary" id="purchaseSubmitBtn">Save purchase</button>
+                <button type="button" class="btn btn-ghost" id="purchaseCancelEditBtn" hidden>Cancel edit</button>
+              </div>
+            </form>
+          </div>
+          <div class="panel" id="purchaseBudgetPanel">
+            <h2>IT budget (admin)</h2>
+            <p class="hint" id="purchaseBudgetAdminHint" hidden>Only administrators can change the budget and currency.</p>
+            <form id="purchaseBudgetForm" class="form">
+              <label>Budget amount
+                <input type="number" name="itBudgetAmount" min="0" step="0.01" value="0" />
+              </label>
+              <label>Currency
+                <select name="itBudgetCurrency">
+                  <option value="NGN">NGN</option>
+                  <option value="USD">USD</option>
+                  <option value="GBP">GBP</option>
+                  <option value="EUR">EUR</option>
+                  <option value="GHS">GHS</option>
+                  <option value="KES">KES</option>
+                  <option value="ZAR">ZAR</option>
+                </select>
+              </label>
+              <label>Track against
+                <select name="itBudgetPeriod">
+                  <option value="month">This month</option>
+                  <option value="year">This year</option>
+                  <option value="all">All time</option>
+                </select>
+              </label>
+              <label>Notes
+                <textarea name="itBudgetNotes" rows="2" placeholder="e.g. FY26 IT capex approved…"></textarea>
+              </label>
+              <button type="submit" class="btn btn-primary">Save budget</button>
+            </form>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:1.5rem">
+          <div class="toolbar" style="margin:0 0 1rem;padding:0;border:0;flex-wrap:wrap;gap:0.5rem">
+            <label class="filter-label">From <input type="date" id="purchaseFilterFrom" /></label>
+            <label class="filter-label">To <input type="date" id="purchaseFilterTo" /></label>
+            <button type="button" class="btn btn-ghost" id="purchaseFilterClearBtn">All dates</button>
+            <button type="button" class="btn btn-secondary" id="purchaseExportBtn">Export CSV</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date / time</th>
+                  <th>Item</th>
+                  <th>Vendor</th>
+                  <th>Amount</th>
+                  <th>Purpose</th>
+                  <th>Asset</th>
+                  <th>Receipt</th>
+                  <th>By</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="purchasesTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- Reports -->
       <section class="view" id="view-reports">
         <div class="panel">
@@ -419,6 +553,7 @@
                 <option value="assets">Asset Inventory</option>
                 <option value="tasks">Task Log Summary</option>
                 <option value="assignments">Assignment History</option>
+                <option value="purchases">IT Purchases &amp; Spend</option>
                 <option value="maintenance">Maintenance Schedule</option>
                 <option value="documentation">Resolution Documentation</option>
                 <option value="full">Full IT Operations Report</option>

@@ -143,6 +143,7 @@ export function applyCloudPayload(payload) {
   const next = {
     ...defaults,
     ...payload,
+    purchases: Array.isArray(payload.purchases) ? payload.purchases : [],
     settings: { ...defaults.settings, ...(payload.settings || {}) },
     automationRules: { ...defaults.automationRules, ...(payload.automationRules || {}) },
   };

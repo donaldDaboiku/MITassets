@@ -33,6 +33,7 @@ export function defaultState() {
     schedules: [],
     automationLog: [],
     documentation: [],
+    purchases: [],
     settings: {
       appName: 'MIT Asset',
       tagline: 'IT Operations Hub',
@@ -61,6 +62,10 @@ export function defaultState() {
       presenceEnabled: false,
       offlineAfterMinutes: 20,
       heartbeatSecret: '',
+      itBudgetAmount: 0,
+      itBudgetCurrency: 'NGN',
+      itBudgetPeriod: 'month',
+      itBudgetNotes: '',
     },
     lastSaved: null,
     authVersion: 0,
@@ -77,6 +82,7 @@ export function loadState() {
         ...defaults,
         ...parsed,
         users: Array.isArray(parsed.users) ? parsed.users : [],
+        purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
         settings: { ...defaults.settings, ...(parsed.settings || {}) },
         automationRules: { ...defaults.automationRules, ...(parsed.automationRules || {}) },
       };
@@ -87,7 +93,9 @@ export function loadState() {
 
 /** Mutable app state (single source of truth). */
 export let state = loadState();
-let storageQuotaWarned = false;
+/** Throttle quota toasts so rapid saves still update the status line without spam. */
+let lastQuotaToastAt = 0;
+const QUOTA_TOAST_INTERVAL_MS = 8000;
 
 export function applyState(next) {
   state = next;
@@ -95,25 +103,31 @@ export function applyState(next) {
 }
 
 export function saveState(opts = {}) {
-  state.lastSaved = new Date().toISOString();
+  const prevLastSaved = state.lastSaved;
+  const stamp = new Date().toISOString();
   try {
+    state.lastSaved = stamp;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    storageQuotaWarned = false;
   } catch (err) {
+    state.lastSaved = prevLastSaved;
     if (err?.name === 'QuotaExceededError') {
-      // ponytail: keep the app usable even when embedded attachments exceed localStorage quota.
-      if (!storageQuotaWarned) {
+      // ponytail: keep the app usable when embedded attachments exceed localStorage quota.
+      const el = document.getElementById('lastSaved');
+      if (el) el.textContent = 'Save failed — storage full';
+      const now = Date.now();
+      if (now - lastQuotaToastAt >= QUOTA_TOAST_INTERVAL_MS) {
         toast('Local storage is full. Remove some large attachments or use cloud backup/export.');
-        storageQuotaWarned = true;
+        lastQuotaToastAt = now;
       }
       console.warn('Local save skipped: storage quota exceeded');
-    } else {
-      throw err;
+      return false;
     }
+    throw err;
   }
   const el = document.getElementById('lastSaved');
-  if (el) el.textContent = 'Saved ' + new Date(state.lastSaved).toLocaleString();
+  if (el) el.textContent = 'Saved ' + new Date(stamp).toLocaleString();
   if (!opts.skipCloud) callHook('scheduleCloudPush');
+  return true;
 }
 
 export function staffName(id) {
