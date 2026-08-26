@@ -87,6 +87,7 @@ export function loadState() {
 
 /** Mutable app state (single source of truth). */
 export let state = loadState();
+let storageQuotaWarned = false;
 
 export function applyState(next) {
   state = next;
@@ -95,7 +96,21 @@ export function applyState(next) {
 
 export function saveState(opts = {}) {
   state.lastSaved = new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    storageQuotaWarned = false;
+  } catch (err) {
+    if (err?.name === 'QuotaExceededError') {
+      // ponytail: keep the app usable even when embedded attachments exceed localStorage quota.
+      if (!storageQuotaWarned) {
+        toast('Local storage is full. Remove some large attachments or use cloud backup/export.');
+        storageQuotaWarned = true;
+      }
+      console.warn('Local save skipped: storage quota exceeded');
+    } else {
+      throw err;
+    }
+  }
   const el = document.getElementById('lastSaved');
   if (el) el.textContent = 'Saved ' + new Date(state.lastSaved).toLocaleString();
   if (!opts.skipCloud) callHook('scheduleCloudPush');

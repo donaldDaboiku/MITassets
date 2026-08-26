@@ -22,7 +22,7 @@ import {
 import { setHook, callHook, modalSession } from './bridge.js';
 import {
   pushToCloud, pullFromCloud, restoreFromCloud, syncOnBoot,
-  renderCloudPanel, scheduleCloudPush, lastCloudPushAt, lastCloudPullAt,
+  renderCloudPanel, scheduleCloudPush, lastCloudPushAt, lastCloudPullAt, cloudConfigured,
   pullHeartbeats,
 } from './cloud.js';
 import {
