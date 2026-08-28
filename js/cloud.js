@@ -6,7 +6,9 @@ import {
 import { setHook, callHook } from './bridge.js';
 
 const CLOUD_SYNC_DELAY_MS = 1500;
-const CLOUD_FETCH_TIMEOUT_MS = 20000;
+const CLOUD_FETCH_TIMEOUT_MS = 45000;
+const CLOUD_PUSH_TIMEOUT_MIN_MS = 90000;
+const CLOUD_PUSH_TIMEOUT_MAX_MS = 300000;
 let cloudSyncTimer = null;
 let cloudBusy = false;
 export let lastCloudPushAt = null;
@@ -66,14 +68,43 @@ function setCloudStatus(text, isError = false) {
   el.classList.toggle('cloud-error', isError);
 }
 
-async function cloudFetch(url, options = {}) {
+function formatCloudBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Rough JSON backup size (receipts/attachments dominate). */
+export function estimateCloudPayloadBytes() {
+  try {
+    return new Blob([JSON.stringify(state)]).size;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function cloudPushTimeoutMs(bodyBytes) {
+  // ponytail: ~50 KB/s upload floor on slow links; cap at 5 min.
+  const scaled = CLOUD_FETCH_TIMEOUT_MS + Math.ceil((bodyBytes || 0) / 50000) * 1000;
+  return Math.min(CLOUD_PUSH_TIMEOUT_MAX_MS, Math.max(CLOUD_PUSH_TIMEOUT_MIN_MS, scaled));
+}
+
+function cloudPullTimeoutMs() {
+  const est = estimateCloudPayloadBytes();
+  if (est <= 0) return CLOUD_FETCH_TIMEOUT_MS;
+  return Math.min(CLOUD_PUSH_TIMEOUT_MAX_MS, Math.max(CLOUD_FETCH_TIMEOUT_MS, cloudPushTimeoutMs(est)));
+}
+
+async function cloudFetch(url, options = {}, timeoutMs = CLOUD_FETCH_TIMEOUT_MS) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), CLOUD_FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     return await fetch(url, { ...options, signal: ctrl.signal });
   } catch (err) {
     if (err?.name === 'AbortError') {
-      throw new Error(`Timed out after ${CLOUD_FETCH_TIMEOUT_MS / 1000}s — check URL / network`);
+      const secs = Math.round(timeoutMs / 1000);
+      throw new Error(`Timed out after ${secs}s — check URL / network (large backups need a stable connection)`);
     }
     throw err;
   } finally {
@@ -95,6 +126,12 @@ function friendlyCloudError(err, statusText = '') {
   if (/permission denied|RLS|row-level security/i.test(msg)) {
     return 'Permission denied — re-run supabase-setup.sql (RLS policies)';
   }
+  if (/payload too large|413|request entity too large/i.test(msg)) {
+    return 'Backup too large for Supabase — remove some receipt/attachment files and try again';
+  }
+  if (/timed out/i.test(msg)) {
+    return msg;
+  }
   return msg.length > 180 ? `${msg.slice(0, 180)}…` : msg;
 }
 
@@ -114,7 +151,8 @@ export async function pullFromCloud({ silent = false } = {}) {
     const id = encodeURIComponent(cloudWorkspaceId());
     const res = await cloudFetch(
       `${cloudBaseUrl()}/rest/v1/mit_workspace?workspace_id=eq.${id}&select=payload,updated_at`,
-      { headers: cloudHeaders() }
+      { headers: cloudHeaders() },
+      cloudPullTimeoutMs()
     );
     if (!res.ok) {
       const errText = await res.text();
@@ -153,23 +191,26 @@ export async function pushToCloud({ silent = false } = {}) {
     return false;
   }
   cloudBusy = true;
-  setCloudStatus('Pushing to cloud…');
+  const payload = JSON.parse(JSON.stringify(state));
+  const body = {
+    workspace_id: cloudWorkspaceId(),
+    payload,
+    updated_at: new Date().toISOString(),
+  };
+  const bodyStr = JSON.stringify(body);
+  const bodyBytes = new Blob([bodyStr]).size;
+  const pushTimeoutMs = cloudPushTimeoutMs(bodyBytes);
+  setCloudStatus(`Pushing to cloud (${formatCloudBytes(bodyBytes)})…`);
   renderCloudPanel();
   try {
-    const payload = JSON.parse(JSON.stringify(state));
-    const body = {
-      workspace_id: cloudWorkspaceId(),
-      payload,
-      updated_at: new Date().toISOString(),
-    };
     const res = await cloudFetch(`${cloudBaseUrl()}/rest/v1/mit_workspace`, {
       method: 'POST',
       headers: {
         ...cloudHeaders(),
         Prefer: 'resolution=merge-duplicates,return=representation',
       },
-      body: JSON.stringify(body),
-    });
+      body: bodyStr,
+    }, pushTimeoutMs);
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(errText || `HTTP ${res.status}`);
@@ -288,10 +329,12 @@ export function renderCloudPanel() {
   const meta = document.getElementById('cloudMeta');
   const pushAt = lastCloudPushAt || state.settings?.lastCloudPushAt || null;
   const pullAt = lastCloudPullAt || state.settings?.lastCloudPullAt || null;
+  const estBytes = cloudConfigured() ? estimateCloudPayloadBytes() : 0;
   if (meta) {
     meta.innerHTML = `
       <div class="storage-stat"><span>Cloud enabled</span><strong>${cloudConfigured() ? 'Yes' : 'No'}</strong></div>
       <div class="storage-stat"><span>Auto-sync</span><strong>${state.settings.autoSyncCloud ? 'On' : 'Off'}</strong></div>
+      <div class="storage-stat"><span>Backup size</span><strong>${estBytes ? formatCloudBytes(estBytes) : '—'}</strong></div>
       <div class="storage-stat"><span>Last push</span><strong>${pushAt ? new Date(pushAt).toLocaleString() : '—'}</strong></div>
       <div class="storage-stat"><span>Last pull</span><strong>${pullAt ? new Date(pullAt).toLocaleString() : '—'}</strong></div>
     `;
