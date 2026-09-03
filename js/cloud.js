@@ -43,7 +43,7 @@ function persistCloudMetaLocally() {
   } catch (_) {}
 }
 
-function cloudHeaders() {
+export function cloudHeaders() {
   const key = String(state.settings.supabaseAnonKey || '').trim();
   return {
     apikey: key,
@@ -53,11 +53,11 @@ function cloudHeaders() {
   };
 }
 
-function cloudBaseUrl() {
+export function cloudBaseUrl() {
   return String(state.settings.supabaseUrl || '').replace(/\/$/, '').trim();
 }
 
-function cloudWorkspaceId() {
+export function cloudWorkspaceId() {
   return (state.settings.workspaceId || 'main').trim() || 'main';
 }
 
@@ -96,7 +96,7 @@ function cloudPullTimeoutMs() {
   return Math.min(CLOUD_PUSH_TIMEOUT_MAX_MS, Math.max(CLOUD_FETCH_TIMEOUT_MS, cloudPushTimeoutMs(est)));
 }
 
-async function cloudFetch(url, options = {}, timeoutMs = CLOUD_FETCH_TIMEOUT_MS) {
+export async function cloudFetch(url, options = {}, timeoutMs = CLOUD_FETCH_TIMEOUT_MS) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {

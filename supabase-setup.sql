@@ -82,3 +82,59 @@ create policy "mit_subsidiaries_anon_all"
   using (true)
   with check (true);
 
+-- ── Device allocation requests (public form → Edge Function insert) ─────────
+-- Public allocate.html never holds the anon key. Submissions go through the
+-- device-allocation Edge Function (service role). The authenticated PWA
+-- uses the anon key for SELECT / UPDATE / DELETE only — never INSERT.
+
+create table if not exists public.mit_allocation_requests (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id text not null default 'main',
+  full_name text not null,
+  email text not null,
+  department text,
+  subsidiary text,
+  job_role text,
+  notes text,
+  signature_name text not null,
+  confirmed_receipt boolean not null default false,
+  device_ids jsonb not null default '[]'::jsonb,
+  devices jsonb not null default '[]'::jsonb,
+  status text not null default 'pending'
+    check (status in ('pending', 'approved', 'rejected')),
+  reject_reason text,
+  processed_at timestamptz,
+  processed_by text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists mit_allocation_requests_workspace_status_idx
+  on public.mit_allocation_requests (workspace_id, status, created_at desc);
+
+alter table public.mit_allocation_requests enable row level security;
+
+drop policy if exists "mit_allocation_requests_anon_select" on public.mit_allocation_requests;
+create policy "mit_allocation_requests_anon_select"
+  on public.mit_allocation_requests
+  for select
+  to anon, authenticated
+  using (true);
+
+drop policy if exists "mit_allocation_requests_anon_update" on public.mit_allocation_requests;
+create policy "mit_allocation_requests_anon_update"
+  on public.mit_allocation_requests
+  for update
+  to anon, authenticated
+  using (true)
+  with check (true);
+
+drop policy if exists "mit_allocation_requests_anon_delete" on public.mit_allocation_requests;
+create policy "mit_allocation_requests_anon_delete"
+  on public.mit_allocation_requests
+  for delete
+  to anon, authenticated
+  using (true);
+
+-- No anon INSERT policy — only the Edge Function (service role) inserts rows.
+
+

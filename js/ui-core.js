@@ -27,7 +27,8 @@ import {
 } from './cloud.js';
 import {
   pushToFirebase, pullFromFirebase, restoreFromFirebase,
-  renderFirebasePanel, firebaseConfigured,
+  renderFirebasePanel, firebaseConfigured, normalizeFirebaseDatabaseUrl,
+  lastFirebaseError,
 } from './firebase-backup.js';
 import {
   presenceStats, formatLastSeen, getHeartbeatUrl, reconcilePresence,
@@ -456,6 +457,7 @@ const titles = {
   tasks: 'Task Logs',
   documentation: 'Documentation',
   assignments: 'Assign & Reassign',
+  allocations: 'Device Allocations',
   purchases: 'IT Purchases',
   reports: 'Generate Reports',
   scores: 'Staff Score Sheet',
@@ -3228,7 +3230,13 @@ document.getElementById('firebaseSettingsForm')?.addEventListener('submit', (e) 
   const fd = new FormData(e.target);
   state.settings.firebaseEnabled = !!fd.get('firebaseEnabled');
   state.settings.autoSyncFirebase = !!fd.get('autoSyncFirebase');
-  state.settings.firebaseDatabaseUrl = (fd.get('firebaseDatabaseUrl') || '').toString().trim();
+  try {
+    state.settings.firebaseDatabaseUrl = normalizeFirebaseDatabaseUrl(fd.get('firebaseDatabaseUrl') || '');
+  } catch (err) {
+    toast(err.message || 'Invalid Firebase URL');
+    return;
+  }
+  if (e.target.firebaseDatabaseUrl) e.target.firebaseDatabaseUrl.value = state.settings.firebaseDatabaseUrl;
   saveState({ skipCloud: true });
   renderFirebasePanel();
   renderSettings();
@@ -3239,11 +3247,18 @@ document.getElementById('firebaseSettingsForm')?.addEventListener('submit', (e) 
 document.getElementById('firebaseTestBtn')?.addEventListener('click', async () => {
   const form = document.getElementById('firebaseSettingsForm');
   if (form) {
-    state.settings.firebaseEnabled = true;
-    state.settings.firebaseDatabaseUrl = form.firebaseDatabaseUrl.value.trim();
+    try {
+      state.settings.firebaseEnabled = true;
+      state.settings.firebaseDatabaseUrl = normalizeFirebaseDatabaseUrl(form.firebaseDatabaseUrl.value);
+      form.firebaseDatabaseUrl.value = state.settings.firebaseDatabaseUrl;
+    } catch (err) {
+      toast(err.message || 'Invalid Firebase URL');
+      return;
+    }
   }
   const row = await pullFromFirebase({ silent: false });
   if (row) toast('Firebase connection OK');
+  else if (!lastFirebaseError) toast('Firebase reachable (empty — Push to create backup)');
 });
 
 document.getElementById('firebasePushBtn')?.addEventListener('click', () => pushToFirebase());
@@ -3308,6 +3323,7 @@ const VIEW_RENDERERS = {
   },
   documentation: () => renderDocumentation(),
   assignments: () => { populateAssignSelects(); renderAssignmentHistory(); },
+  allocations: () => callHook('renderAllocations'),
   purchases: () => callHook('renderPurchases'),
   scores: () => callHook('renderStaffScores'),
   automation: () => renderAutomation(),

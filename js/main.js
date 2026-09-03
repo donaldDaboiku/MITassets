@@ -33,6 +33,7 @@ import './storage-ui.js';
 import { registerPurchases } from './purchases.js';
 import { registerStaffScores } from './staff-scores.js';
 import { registerRecurringTasks } from './recurring-tasks.js';
+import { registerAllocations, refreshAllocationBadge } from './allocation-ui.js';
 import { toast } from './utils.js';
 
 // Side-effect: ui-core registers DOM listeners on import
@@ -47,6 +48,7 @@ registerWindowActions();
 registerPurchases();
 registerStaffScores();
 registerRecurringTasks();
+registerAllocations();
 setHook('updateLoggedInUI', updateLoggedInUI);
 
 async function boot() {
@@ -71,6 +73,7 @@ async function boot() {
   renderLoginHints();
   renderCloudPanel();
   renderFirebasePanel();
+  refreshAllocationBadge().catch(() => {});
 
   const sessionId = getSessionUserId();
   if (sessionId && state.staff.some((s) => s.id === sessionId)) {
@@ -81,7 +84,7 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=35').then((reg) => {
+    navigator.serviceWorker.register('./sw.js?v=37').then((reg) => {
       reg.update();
     }).catch(() => {});
   }

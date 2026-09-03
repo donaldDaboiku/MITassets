@@ -35,7 +35,27 @@ Open the printed URL, hard-refresh once after updates.
 | `js/storage-ui.js` | Storage/settings surface |
 | `js/cloud.js` | Supabase push/pull/restore + heartbeat pull |
 | `js/presence.js` | Network presence reconcile (active ↔ offline) |
+| `js/allocation-ui.js` | Device allocation review (approve/reject) |
 | `js/ui-core.js` | Extracted UI (split further over time) |
+| `allocate.html` | Public onboarding form (no login, no API keys) |
+
+## Device allocation (paperless handout)
+
+New hires / HR submit device requests from a public link; IT approves inside the app.
+
+1. Re-run `supabase-setup.sql` (adds `mit_allocation_requests` + RLS: anon SELECT/UPDATE/DELETE only — no INSERT).
+2. Deploy the Edge Function **without** JWT verification:
+
+```bash
+supabase functions deploy device-allocation --no-verify-jwt
+```
+
+3. In the app: enable Cloud Sync (Supabase URL + anon key + workspace id).
+4. Open **Allocations** → copy the **Onboarding link** (built from project URL + workspace only — never embeds the anon key).
+5. Share that link. Recipients open `allocate.html`, pick **available** devices, type a matching signature, confirm receipt, and submit.
+6. IT sees pending rows under **Allocations** → **Approve** (creates/matches device user, sets assets `active` + `usedBy`, logs via Assignment History) or **Reject**.
+
+See `supabase/functions/device-allocation/README.md`.
 
 ## Network presence
 

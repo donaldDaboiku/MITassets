@@ -47,8 +47,46 @@ function persistFirebaseMetaLocally() {
   } catch (_) {}
 }
 
+/**
+ * Accept a Realtime Database root URL.
+ * Rejects Firebase Console links and rewrites common mistakes.
+ */
+export function normalizeFirebaseDatabaseUrl(raw) {
+  let url = String(raw || '').trim();
+  if (!url) return '';
+
+  // Console link: …/project/mit-asset/database/mit-asset-default-rtdb/…
+  const consoleMatch = url.match(/console\.firebase\.google\.com\/project\/[^/]+\/database\/([^/]+)/i);
+  if (consoleMatch) {
+    const dbId = consoleMatch[1];
+    // US default host; regional DBs use *.firebasedatabase.app (user can fix in Settings if needed)
+    return `https://${dbId}.firebaseio.com`;
+  }
+
+  if (/console\.firebase\.google\.com/i.test(url)) {
+    throw new Error('Paste the Database URL (https://….firebaseio.com), not the Console page link');
+  }
+
+  // Accidental path leftovers
+  url = url.replace(/\/(data|rules)(\/.*)?$/i, '');
+  url = url.replace(/\.json$/i, '');
+  url = url.replace(/\/$/, '');
+
+  if (!/^https:\/\//i.test(url)) {
+    throw new Error('Firebase URL must start with https://');
+  }
+  if (!/\.firebaseio\.com$|\.firebasedatabase\.app$/i.test(url.replace(/\/$/, ''))) {
+    throw new Error('Expected …firebaseio.com or …firebasedatabase.app (Realtime Database URL)');
+  }
+  return url.replace(/\/$/, '');
+}
+
 function firebaseBaseUrl() {
-  return String(state.settings.firebaseDatabaseUrl || '').replace(/\/$/, '').trim();
+  try {
+    return normalizeFirebaseDatabaseUrl(state.settings.firebaseDatabaseUrl);
+  } catch (_) {
+    return String(state.settings.firebaseDatabaseUrl || '').replace(/\/$/, '').trim();
+  }
 }
 
 function firebaseWorkspaceId() {
@@ -89,8 +127,11 @@ async function firebaseFetch(url, options = {}, timeoutMs = FIREBASE_FETCH_TIMEO
 
 function friendlyFirebaseError(err) {
   const msg = String(err?.message || err || 'Unknown error');
+  if (/Paste the Database URL|must start with https|Expected …firebaseio/i.test(msg)) {
+    return msg;
+  }
   if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) {
-    return 'Network failed — check Firebase Database URL and security rules';
+    return 'Network failed — use https://YOUR-DB.firebaseio.com (not the Console link), then set Rules';
   }
   if (/401|403|Permission denied/i.test(msg)) {
     return 'Firebase denied access — set Realtime Database rules (see firebase-database.rules.json)';
@@ -118,6 +159,7 @@ export async function pullFromFirebase({ silent = false } = {}) {
   setFirebaseStatus('Pulling from Firebase…');
   renderFirebasePanel();
   try {
+    state.settings.firebaseDatabaseUrl = normalizeFirebaseDatabaseUrl(state.settings.firebaseDatabaseUrl);
     const res = await firebaseFetch(firebaseRefUrl(), {}, pushTimeoutMs(0));
     if (!res.ok) {
       const errText = await res.text();
@@ -156,12 +198,14 @@ export async function pushToFirebase({ silent = false } = {}) {
     return false;
   }
   firebaseBusy = true;
-  const payload = JSON.parse(JSON.stringify(state));
-  const bodyStr = JSON.stringify(payload);
-  const bodyBytes = new Blob([bodyStr]).size;
-  setFirebaseStatus(`Pushing to Firebase (${formatBytes(bodyBytes)})…`);
+  setFirebaseStatus('Pushing to Firebase…');
   renderFirebasePanel();
   try {
+    state.settings.firebaseDatabaseUrl = normalizeFirebaseDatabaseUrl(state.settings.firebaseDatabaseUrl);
+    const payload = JSON.parse(JSON.stringify(state));
+    const bodyStr = JSON.stringify(payload);
+    const bodyBytes = new Blob([bodyStr]).size;
+    setFirebaseStatus(`Pushing to Firebase (${formatBytes(bodyBytes)})…`);
     const res = await firebaseFetch(firebaseRefUrl(), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

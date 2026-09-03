@@ -1,4 +1,4 @@
-const CACHE = 'mit-asset-v35';
+const CACHE = 'mit-asset-v37';
 const ASSETS = [
   './',
   './index.html',
@@ -17,6 +17,7 @@ const ASSETS = [
   './js/purchases.js',
   './js/staff-scores.js',
   './js/recurring-tasks.js',
+  './js/allocation-ui.js',
   './js/ui-core.js',
   './manifest.json',
   './icons/icon.svg',

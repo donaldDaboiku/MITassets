@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Device Allocation — MIT Asset</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .alloc-page {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 3rem;
+    }
+    .alloc-page .brand { margin-bottom: 1.25rem; }
+    .alloc-group { margin-bottom: 1rem; }
+    .alloc-group h3 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+    .alloc-device {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.65rem;
+      padding: 0.65rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface2);
+      margin-bottom: 0.4rem;
+      cursor: pointer;
+    }
+    .alloc-device:hover { border-color: var(--primary); }
+    .alloc-device input { margin-top: 0.2rem; }
+    .alloc-device strong { display: block; }
+    .alloc-device span { font-size: 0.85rem; color: var(--muted); }
+    .alloc-status { margin: 0.75rem 0; }
+    .alloc-status.error { color: var(--danger); }
+    .alloc-status.ok { color: var(--success); }
+    .sig-hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+    .sig-hint.bad { color: var(--danger); }
+    .sig-hint.good { color: var(--success); }
+  </style>
+</head>
+<body>
+  <div class="alloc-page">
+    <div class="brand">
+      <span class="brand-icon">⚙</span>
+      <div>
+        <strong>MIT Asset</strong>
+        <small>New staff device allocation</small>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Request devices</h2>
+      <p class="hint" id="allocConfigHint">Loading available devices…</p>
+      <p class="alloc-status" id="allocStatus" hidden></p>
+
+      <form id="allocForm" class="form" hidden>
+        <fieldset style="border:0;padding:0;margin:0">
+          <legend style="font-weight:600;margin-bottom:0.5rem">Available devices</legend>
+          <div id="deviceList"></div>
+          <p class="hint" id="deviceEmpty" hidden>No available devices right now. Ask IT to mark stock as Available.</p>
+        </fieldset>
+
+        <label>Full name
+          <input type="text" name="fullName" required autocomplete="name" />
+        </label>
+        <label>Work email
+          <input type="email" name="email" required autocomplete="email" />
+        </label>
+        <div class="form-row-2">
+          <label>Department
+            <input type="text" name="department" autocomplete="organization-title" />
+          </label>
+          <label>Subsidiary / company
+            <input type="text" name="subsidiary" autocomplete="organization" />
+          </label>
+        </div>
+        <label>Job role
+          <input type="text" name="jobRole" placeholder="e.g. Analyst" />
+        </label>
+        <label>Notes (optional)
+          <textarea name="notes" rows="2" placeholder="Preferred size, accessories…"></textarea>
+        </label>
+
+        <label>Type your full name as signature
+          <input type="text" name="signatureName" required autocomplete="off" />
+        </label>
+        <p class="sig-hint" id="sigHint">Signature must match your full name.</p>
+
+        <label class="toggle-item" style="flex-direction:row;align-items:flex-start;gap:0.6rem">
+          <input type="checkbox" name="confirmedReceipt" required style="margin-top:0.2rem" />
+          <span>I confirm receipt of the selected device(s) in good working condition.</span>
+        </label>
+
+        <button type="submit" class="btn btn-primary btn-block" id="allocSubmit">Submit allocation request</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script>
+    (function () {
+      // Public page: only project URL + workspace from query string — never anon/service keys.
+      const params = new URLSearchParams(location.search);
+      const supabaseUrl = String(params.get('supabaseUrl') || params.get('u') || '')
+        .trim()
+        .replace(/\/$/, '');
+      const workspaceId = String(params.get('workspace') || params.get('w') || 'main').trim() || 'main';
+
+      const hint = document.getElementById('allocConfigHint');
+      const statusEl = document.getElementById('allocStatus');
+      const form = document.getElementById('allocForm');
+      const deviceList = document.getElementById('deviceList');
+      const deviceEmpty = document.getElementById('deviceEmpty');
+      const sigHint = document.getElementById('sigHint');
+      const toastEl = document.getElementById('toast');
+
+      function toast(msg) {
+        toastEl.textContent = msg;
+        toastEl.hidden = false;
+        clearTimeout(toastEl._t);
+        toastEl._t = setTimeout(() => { toastEl.hidden = true; }, 2800);
+      }
+
+      function setStatus(msg, isError) {
+        statusEl.hidden = !msg;
+        statusEl.textContent = msg || '';
+        statusEl.classList.toggle('error', !!isError);
+        statusEl.classList.toggle('ok', !!msg && !isError);
+      }
+
+      function normalizeName(v) {
+        return String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+      }
+
+      function namesMatch(a, b) {
+        const na = normalizeName(a);
+        const nb = normalizeName(b);
+        return na.length > 0 && na === nb;
+      }
+
+      function typeLabel(type) {
+        const t = String(type || 'other');
+        return t.charAt(0).toUpperCase() + t.slice(1);
+      }
+
+      function fnUrl() {
+        return `${supabaseUrl}/functions/v1/device-allocation?workspace_id=${encodeURIComponent(workspaceId)}`;
+      }
+
+      function updateSigHint() {
+        const name = form.fullName.value;
+        const sig = form.signatureName.value;
+        if (!sig.trim()) {
+          sigHint.textContent = 'Signature must match your full name.';
+          sigHint.className = 'sig-hint';
+          return;
+        }
+        if (namesMatch(name, sig)) {
+          sigHint.textContent = 'Signature matches.';
+          sigHint.className = 'sig-hint good';
+        } else {
+          sigHint.textContent = 'Signature does not match full name.';
+          sigHint.className = 'sig-hint bad';
+        }
+      }
+
+      function renderDevices(devices) {
+        const groups = {};
+        devices.forEach((d) => {
+          const key = d.type || 'other';
+          if (!groups[key]) groups[key] = [];
+          groups[key].push(d);
+        });
+        const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+        if (!keys.length) {
+          deviceList.innerHTML = '';
+          deviceEmpty.hidden = false;
+          return;
+        }
+        deviceEmpty.hidden = true;
+        deviceList.innerHTML = keys.map((type) => `
+          <div class="alloc-group">
+            <h3>${typeLabel(type)}</h3>
+            ${groups[type].map((d) => `
+              <label class="alloc-device">
+                <input type="checkbox" name="deviceIds" value="${String(d.id).replace(/"/g, '')}" />
+                <span>
+                  <strong>${escapeHtml(d.tag)} — ${escapeHtml(d.name)}</strong>
+                  <span>${escapeHtml(typeLabel(d.type))}</span>
+                </span>
+              </label>
+            `).join('')}
+          </div>
+        `).join('');
+      }
+
+      function escapeHtml(s) {
+        return String(s || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      async function loadDevices() {
+        if (!supabaseUrl || !/^https:\/\//i.test(supabaseUrl)) {
+          hint.textContent = 'Invalid link. Ask IT for the Device Allocation onboarding link from MIT Asset → Allocations.';
+          return;
+        }
+        try {
+          const res = await fetch(fnUrl(), { method: 'GET' });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+          hint.textContent = `Workspace: ${workspaceId} · ${ (data.devices || []).length } available device(s)`;
+          form.hidden = false;
+          renderDevices(data.devices || []);
+        } catch (err) {
+          hint.textContent = 'Could not load devices. Check the link or ask IT to deploy the device-allocation function.';
+          setStatus(String(err.message || err), true);
+        }
+      }
+
+      form.fullName.addEventListener('input', updateSigHint);
+      form.signatureName.addEventListener('input', updateSigHint);
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        setStatus('');
+        const fd = new FormData(form);
+        const fullName = String(fd.get('fullName') || '').trim();
+        const signatureName = String(fd.get('signatureName') || '').trim();
+        const deviceIds = [...form.querySelectorAll('input[name="deviceIds"]:checked')].map((el) => el.value);
+
+        if (!namesMatch(fullName, signatureName)) {
+          setStatus('Signature must match your full name.', true);
+          updateSigHint();
+          return;
+        }
+        if (!deviceIds.length) {
+          setStatus('Select at least one device.', true);
+          return;
+        }
+        if (!fd.get('confirmedReceipt')) {
+          setStatus('Confirm receipt before submitting.', true);
+          return;
+        }
+
+        const btn = document.getElementById('allocSubmit');
+        btn.disabled = true;
+        try {
+          const res = await fetch(fnUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              workspaceId,
+              fullName,
+              email: String(fd.get('email') || '').trim(),
+              department: String(fd.get('department') || '').trim(),
+              subsidiary: String(fd.get('subsidiary') || '').trim(),
+              jobRole: String(fd.get('jobRole') || '').trim(),
+              notes: String(fd.get('notes') || '').trim(),
+              signatureName,
+              confirmedReceipt: true,
+              deviceIds,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            if (data.unavailable) {
+              throw new Error('Some devices were just taken — refresh and choose again.');
+            }
+            throw new Error(data.error || `HTTP ${res.status}`);
+          }
+          form.reset();
+          updateSigHint();
+          setStatus('Request submitted. IT will review and confirm your devices.', false);
+          toast('Allocation request sent');
+          await loadDevices();
+        } catch (err) {
+          setStatus(String(err.message || err), true);
+          toast('Submit failed');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      loadDevices();
+    })();
+  </script>
+</body>
+</html>

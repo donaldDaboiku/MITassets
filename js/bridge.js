@@ -27,6 +27,8 @@ export const hooks = {
   syncAdminNav: null,
   renderRecurringTasks: null,
   spawnRecurringTasks: null,
+  renderAllocations: null,
+  refreshAllocationBadge: null,
 };
 
 /** Mutable bag shared across modal forms (attachments in progress). */
