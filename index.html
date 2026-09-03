@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=33">
+  <link rel="stylesheet" href="styles.css?v=35">
 </head>
 <body>
   <!-- Login -->
@@ -827,7 +827,7 @@
                 <input type="file" id="importFile" accept=".json" hidden />
               </label>
             </div>
-            <p class="hint">Export regularly. Browser storage can be cleared — cloud sync protects against that.</p>
+            <p class="hint">Export regularly. Browser storage can be cleared — use cloud sync or Firebase mirror below.</p>
           </div>
           <div class="panel">
             <h2>Cloud Storage (Supabase)</h2>
@@ -838,8 +838,19 @@
               <button class="btn btn-secondary" id="cloudPullBtn">Check Cloud</button>
               <button class="btn btn-secondary" id="cloudRestoreBtn">Restore from Cloud</button>
             </div>
-            <p class="hint">Setup: create a free <a href="https://supabase.com" target="_blank" rel="noopener">Supabase</a> project → run <code>supabase-setup.sql</code> → paste URL & anon key in Settings.</p>
+            <p class="hint">Cleared browser cache? Re-enter Supabase URL &amp; anon key in <strong>Settings</strong>, then click <strong>Restore from Cloud</strong>.</p>
+            <p class="hint">Setup: create a free <a href="https://supabase.com" target="_blank" rel="noopener">Supabase</a> project → run <code>supabase-setup.sql</code> → paste URL &amp; anon key in Settings.</p>
           </div>
+          <div class="panel">
+            <h2>Backup mirror (Firebase)</h2>
+            <p class="hint" id="firebaseStatus">Firebase backup off — configure in Settings</p>
+            <div class="storage-stats" id="firebaseMeta"></div>
+            <div class="storage-actions" style="margin-top:0.75rem">
+              <button class="btn btn-primary" id="firebasePushBtn">Push to Firebase</button>
+              <button class="btn btn-secondary" id="firebasePullBtn">Check Firebase</button>
+              <button class="btn btn-secondary" id="firebaseRestoreBtn">Restore from Firebase</button>
+            </div>
+            <p class="hint">Free Google backup until you have Namecheap hosting. Create a <a href="https://console.firebase.google.com/" target="_blank" rel="noopener">Firebase</a> project → Realtime Database → paste Database URL in Settings → apply rules from <code>firebase-database.rules.json</code>.</p>
           <div class="panel" id="teamPanel">
             <h2>IT Team Members</h2>
             <div id="adminStaffSection">
@@ -1010,6 +1021,25 @@
               </label>
               <button type="submit" class="btn btn-primary">Save Cloud Settings</button>
               <button type="button" class="btn btn-secondary" id="cloudTestBtn">Test Connection</button>
+            </form>
+          </div>
+          <div class="panel">
+            <h2>Firebase Backup (free mirror)</h2>
+            <p class="hint">Second cloud copy on Google Firebase — useful until you move to Namecheap hosting. Uses the same Workspace ID as Supabase.</p>
+            <form id="firebaseSettingsForm" class="form">
+              <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+                Enable Firebase backup
+                <input type="checkbox" name="firebaseEnabled" />
+              </label>
+              <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+                Auto-sync after each save
+                <input type="checkbox" name="autoSyncFirebase" />
+              </label>
+              <label>Firebase Realtime Database URL
+                <input type="url" name="firebaseDatabaseUrl" placeholder="https://YOUR-PROJECT-default-rtdb.firebaseio.com" />
+              </label>
+              <button type="submit" class="btn btn-primary">Save Firebase Settings</button>
+              <button type="button" class="btn btn-secondary" id="firebaseTestBtn">Test Connection</button>
             </form>
           </div>
           <div class="panel">

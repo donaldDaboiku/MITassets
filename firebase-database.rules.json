@@ -1,0 +1,8 @@
+{
+  "rules": {
+    "mit_asset": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}

@@ -15,6 +15,7 @@ import {
   updateLoggedInUI,
 } from './auth.js';
 import { registerCloudHooks, syncOnBoot, renderCloudPanel } from './cloud.js';
+import { registerFirebaseHooks, syncOnFirebaseBoot, renderFirebasePanel } from './firebase-backup.js';
 import {
   registerPresenceHooks,
   reconcilePresence,
@@ -39,6 +40,7 @@ import './ui-core.js';
 
 wireAuthHooks();
 registerCloudHooks();
+registerFirebaseHooks();
 registerPresenceHooks();
 registerUiHooks();
 registerWindowActions();
@@ -51,6 +53,7 @@ async function boot() {
   await ensureStaffAuth();
   await normalizeStoredLogo();
   await syncOnBoot();
+  await syncOnFirebaseBoot();
   await ensureStaffAuth();
   bindTaskHoverPreview();
 
@@ -67,6 +70,7 @@ async function boot() {
   callHook('applyBrandingToLogin');
   renderLoginHints();
   renderCloudPanel();
+  renderFirebasePanel();
 
   const sessionId = getSessionUserId();
   if (sessionId && state.staff.some((s) => s.id === sessionId)) {
@@ -77,7 +81,7 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=33').then((reg) => {
+    navigator.serviceWorker.register('./sw.js?v=35').then((reg) => {
       reg.update();
     }).catch(() => {});
   }

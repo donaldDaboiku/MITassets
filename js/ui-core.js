@@ -26,6 +26,10 @@ import {
   pullHeartbeats,
 } from './cloud.js';
 import {
+  pushToFirebase, pullFromFirebase, restoreFromFirebase,
+  renderFirebasePanel, firebaseConfigured,
+} from './firebase-backup.js';
+import {
   presenceStats, formatLastSeen, getHeartbeatUrl, reconcilePresence,
   startPresencePolling, stopPresencePolling, isPresenceEnabled,
   ensureAssetPresenceFields,
@@ -1992,6 +1996,7 @@ function renderStorage() {
   }
 
   renderCloudPanel();
+  renderFirebasePanel();
 }
 
 
@@ -2238,7 +2243,11 @@ document.getElementById('importFile').addEventListener('change', (e) => {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const imported = JSON.parse(reader.result);
+      let imported = JSON.parse(reader.result);
+      // Supabase Table Editor export: { workspace_id, payload, updated_at } or [{ ... }]
+      if (Array.isArray(imported) && imported[0]?.payload) imported = imported[0];
+      if (imported?.payload && typeof imported.payload === 'object') imported = imported.payload;
+      if (typeof imported?.payload === 'string') imported = JSON.parse(imported.payload);
       const defaults = defaultState();
       state = {
         ...defaults,
@@ -3007,6 +3016,13 @@ function renderSettings() {
     cloudForm.workspaceId.value = s.workspaceId || 'main';
   }
 
+  const firebaseForm = document.getElementById('firebaseSettingsForm');
+  if (firebaseForm) {
+    firebaseForm.firebaseEnabled.checked = !!s.firebaseEnabled;
+    firebaseForm.autoSyncFirebase.checked = s.autoSyncFirebase !== false;
+    firebaseForm.firebaseDatabaseUrl.value = s.firebaseDatabaseUrl || '';
+  }
+
   const presenceForm = document.getElementById('presenceSettingsForm');
   const presencePanel = document.getElementById('presenceSettingsPanel');
   if (presenceForm) {
@@ -3023,6 +3039,7 @@ function renderSettings() {
 
   applyBranding();
   renderCloudPanel();
+  renderFirebasePanel();
 }
 
 function updateTagPreview() {
@@ -3201,6 +3218,37 @@ document.getElementById('cloudTestBtn')?.addEventListener('click', async () => {
 document.getElementById('cloudPushBtn')?.addEventListener('click', () => pushToCloud());
 document.getElementById('cloudPullBtn')?.addEventListener('click', () => pullFromCloud());
 document.getElementById('cloudRestoreBtn')?.addEventListener('click', () => restoreFromCloud());
+
+document.getElementById('firebaseSettingsForm')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!isAdmin()) {
+    toast('Only administrators can change Firebase settings');
+    return;
+  }
+  const fd = new FormData(e.target);
+  state.settings.firebaseEnabled = !!fd.get('firebaseEnabled');
+  state.settings.autoSyncFirebase = !!fd.get('autoSyncFirebase');
+  state.settings.firebaseDatabaseUrl = (fd.get('firebaseDatabaseUrl') || '').toString().trim();
+  saveState({ skipCloud: true });
+  renderFirebasePanel();
+  renderSettings();
+  toast('Firebase settings saved');
+  if (state.settings.firebaseEnabled) pushToFirebase({ silent: false });
+});
+
+document.getElementById('firebaseTestBtn')?.addEventListener('click', async () => {
+  const form = document.getElementById('firebaseSettingsForm');
+  if (form) {
+    state.settings.firebaseEnabled = true;
+    state.settings.firebaseDatabaseUrl = form.firebaseDatabaseUrl.value.trim();
+  }
+  const row = await pullFromFirebase({ silent: false });
+  if (row) toast('Firebase connection OK');
+});
+
+document.getElementById('firebasePushBtn')?.addEventListener('click', () => pushToFirebase());
+document.getElementById('firebasePullBtn')?.addEventListener('click', () => pullFromFirebase());
+document.getElementById('firebaseRestoreBtn')?.addEventListener('click', () => restoreFromFirebase());
 
 document.getElementById('presenceSettingsForm')?.addEventListener('submit', (e) => {
   e.preventDefault();

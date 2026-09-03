@@ -62,6 +62,11 @@ export function defaultState() {
       lastExportAt: null,
       lastCloudPushAt: null,
       lastCloudPullAt: null,
+      firebaseEnabled: false,
+      firebaseDatabaseUrl: '',
+      autoSyncFirebase: true,
+      lastFirebasePushAt: null,
+      lastFirebasePullAt: null,
       presenceEnabled: false,
       offlineAfterMinutes: 20,
       heartbeatSecret: '',
@@ -133,7 +138,10 @@ export function saveState(opts = {}) {
   }
   const el = document.getElementById('lastSaved');
   if (el) el.textContent = 'Saved ' + new Date(stamp).toLocaleString();
-  if (!opts.skipCloud) callHook('scheduleCloudPush');
+  if (!opts.skipCloud) {
+    callHook('scheduleCloudPush');
+    callHook('scheduleFirebasePush');
+  }
   return true;
 }
 
