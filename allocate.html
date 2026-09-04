@@ -217,7 +217,12 @@
         try {
           const res = await fetch(fnUrl(), { method: 'GET' });
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+          if (!res.ok) {
+            if (res.status === 404) {
+              throw new Error('Allocation function not deployed — ask IT to run: supabase functions deploy device-allocation --no-verify-jwt');
+            }
+            throw new Error(data.error || `HTTP ${res.status}`);
+          }
           hint.textContent = `Workspace: ${workspaceId} · ${ (data.devices || []).length } available device(s)`;
           form.hidden = false;
           renderDevices(data.devices || []);
