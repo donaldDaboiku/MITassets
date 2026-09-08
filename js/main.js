@@ -34,6 +34,7 @@ import { registerPurchases } from './purchases.js';
 import { registerStaffScores } from './staff-scores.js';
 import { registerRecurringTasks } from './recurring-tasks.js';
 import { registerAllocations, refreshAllocationBadge } from './allocation-ui.js';
+import { registerAccessories } from './accessories.js';
 import { toast } from './utils.js';
 
 // Side-effect: ui-core registers DOM listeners on import
@@ -49,6 +50,7 @@ registerPurchases();
 registerStaffScores();
 registerRecurringTasks();
 registerAllocations();
+registerAccessories();
 setHook('updateLoggedInUI', updateLoggedInUI);
 
 async function boot() {
@@ -84,7 +86,7 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=37').then((reg) => {
+    navigator.serviceWorker.register('./sw.js?v=40').then((reg) => {
       reg.update();
     }).catch(() => {});
   }

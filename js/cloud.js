@@ -249,6 +249,7 @@ export function applyCloudPayload(payload) {
     purchases: Array.isArray(payload.purchases) ? payload.purchases : [],
     stockItems: Array.isArray(payload.stockItems) ? payload.stockItems : [],
     recurringTasks: Array.isArray(payload.recurringTasks) ? payload.recurringTasks : [],
+    accessoryReplacements: Array.isArray(payload.accessoryReplacements) ? payload.accessoryReplacements : [],
     settings: { ...defaults.settings, ...(payload.settings || {}) },
     automationRules: { ...defaults.automationRules, ...(payload.automationRules || {}) },
   };

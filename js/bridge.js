@@ -29,6 +29,8 @@ export const hooks = {
   spawnRecurringTasks: null,
   renderAllocations: null,
   refreshAllocationBadge: null,
+  assetAccessorySectionHtml: null,
+  submitAccessoryReplace: null,
 };
 
 /** Mutable bag shared across modal forms (attachments in progress). */

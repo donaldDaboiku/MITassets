@@ -753,8 +753,10 @@ function assetDetailMarkup(a) {
       <button type="button" class="btn btn-sm btn-primary" onclick="editAsset('${a.id}')">Edit</button>
       <button type="button" class="btn btn-sm btn-secondary" onclick="openReassignAsset('${a.id}')">Reassign</button>
       <button type="button" class="btn btn-sm btn-secondary" onclick="openTransferAsset('${a.id}')">Transfer</button>
+      <button type="button" class="btn btn-sm btn-primary" onclick="openAccessoryReplace('${a.id}')">Accessory</button>
       <button type="button" class="btn btn-sm btn-ghost" onclick="retireAsset('${a.id}')">Retire</button>
     </div>
+    ${callHook('assetAccessorySectionHtml', a) || ''}
     <h3 style="margin:1rem 0 0.5rem;font-size:0.95rem">Device history</h3>
     <div class="list-mini">${histHtml}</div>
     <h3 style="margin:1rem 0 0.5rem;font-size:0.95rem">Linked tasks</h3>
@@ -857,6 +859,9 @@ const ASSET_TYPE_ALIASES = {
   server: 'server',
   network: 'network', router: 'network', switch: 'network',
   software: 'software', license: 'software',
+  phone: 'other', mobile: 'other', smartphone: 'other',
+  mouse: 'other', keyboard: 'other', accessory: 'other',
+  flashdrive: 'other', 'flash drive': 'other', usb: 'other', pendrive: 'other',
   other: 'other',
 };
 
@@ -872,10 +877,28 @@ const ASSET_STATUS_ALIASES = {
 
 function normalizeHeader(h) {
   return String(h || '')
+    .replace(/^\uFEFF/, '') // Excel/CSV BOM on first column
     .trim()
     .toLowerCase()
-    .replace(/[_-]+/g, ' ')
+    .replace(/[_./\\#-]+/g, ' ')
     .replace(/\s+/g, ' ');
+}
+
+function headerMatches(header, ...candidates) {
+  const n = normalizeHeader(header);
+  if (!n) return false;
+  const compact = n.replace(/\s+/g, '');
+  return candidates.some((c) => {
+    const w = normalizeHeader(c);
+    const wc = w.replace(/\s+/g, '');
+    if (!w) return false;
+    if (n === w || compact === wc) return true;
+    // Avoid short tokens like "id" matching "subsidiary"
+    if (w.length <= 2) return false;
+    if (n.startsWith(`${w} `) || n.endsWith(` ${w}`) || n.includes(` ${w} `)) return true;
+    if (wc.length > 2 && (compact.startsWith(wc) || compact.endsWith(wc))) return true;
+    return false;
+  });
 }
 
 function excelDateToISO(value) {
@@ -897,32 +920,119 @@ function excelDateToISO(value) {
   return '';
 }
 
+function cellFromRow(row, ...candidates) {
+  for (const [k, v] of Object.entries(row)) {
+    if (v == null || String(v).trim() === '') continue;
+    if (headerMatches(k, ...candidates)) return String(v).trim();
+  }
+  return '';
+}
+
+function looksLikeAssetHeaderRow(cells) {
+  const labels = (cells || []).map(normalizeHeader).filter(Boolean);
+  if (!labels.length) return false;
+  return labels.some((h) => headerMatches(h,
+    'tag', 'asset tag', 'name', 'asset name', 'hostname', 'serial', 'type', 'status', 'device', 'model'
+  ));
+}
+
+function rowsFromMatrix(matrix) {
+  if (!matrix?.length) return { rows: [], headers: [] };
+  let headerIdx = 0;
+  const scan = Math.min(8, matrix.length);
+  for (let i = 0; i < scan; i++) {
+    if (looksLikeAssetHeaderRow(matrix[i])) {
+      headerIdx = i;
+      break;
+    }
+  }
+  let headers = (matrix[headerIdx] || []).map((h, i) => {
+    const label = String(h ?? '').replace(/^\uFEFF/, '').trim();
+    return label || `Column ${i + 1}`;
+  });
+  // No recognizable header row — treat first row as data using template column order.
+  if (!looksLikeAssetHeaderRow(matrix[headerIdx])) {
+    headerIdx = -1;
+    headers = ASSET_IMPORT_HEADERS.slice();
+  }
+  const start = headerIdx + 1;
+  const rows = [];
+  for (let r = start; r < matrix.length; r++) {
+    const cells = matrix[r] || [];
+    if (cells.every((c) => c == null || String(c).trim() === '')) continue;
+    const row = {};
+    headers.forEach((h, i) => {
+      row[h] = cells[i] != null ? cells[i] : '';
+    });
+    // If more cells than headers, append extras into Notes
+    if (cells.length > headers.length) {
+      const extra = cells.slice(headers.length).filter((c) => String(c || '').trim()).join(' | ');
+      if (extra) row.Notes = row.Notes ? `${row.Notes} | ${extra}` : extra;
+    }
+    rows.push(row);
+  }
+  return { rows, headers };
+}
+
+function detectCsvDelimiter(sampleLine) {
+  const line = String(sampleLine || '');
+  const counts = {
+    ',': (line.match(/,/g) || []).length,
+    ';': (line.match(/;/g) || []).length,
+    '\t': (line.match(/\t/g) || []).length,
+    '|': (line.match(/\|/g) || []).length,
+  };
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return best && best[1] > 0 ? best[0] : ',';
+}
+
+async function readAssetImportMatrix(file) {
+  const name = String(file.name || '').toLowerCase();
+  const isCsv = name.endsWith('.csv') || file.type === 'text/csv' || file.type === 'text/plain';
+  if (isCsv) {
+    let text = await file.text();
+    text = text.replace(/^\uFEFF/, '');
+    const firstDataLine = text.split(/\r?\n/).find((l) => l.trim()) || '';
+    const FS = detectCsvDelimiter(firstDataLine);
+    const wb = XLSX.read(text, { type: 'string', FS, raw: false });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+  }
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data, { type: 'array', cellDates: true });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+}
 
 function mapAssetImportRow(row) {
-  const get = (...keys) => {
-    for (const key of keys) {
-      const want = normalizeHeader(key);
-      for (const [k, v] of Object.entries(row)) {
-        if (normalizeHeader(k) === want && v != null && String(v).trim() !== '') {
-          return String(v).trim();
-        }
-      }
-    }
-    return '';
-  };
-
-  const rawType = get('Type', 'Asset Type', 'Category');
-  const rawStatus = get('Status', 'Asset Status');
+  const rawType = cellFromRow(row, 'Type', 'Asset Type', 'Category', 'Device Type', 'Item Type');
+  const rawStatus = cellFromRow(row, 'Status', 'Asset Status', 'State', 'Condition');
   const typeKey = normalizeHeader(rawType).replace(/\s+/g, '');
   const statusKey = normalizeHeader(rawStatus);
 
-  const tag = get('Tag', 'Asset Tag', 'Asset ID', 'ID');
-  const name = get('Name', 'Asset Name', 'Description', 'Model');
+  let tag = cellFromRow(row,
+    'Tag', 'Asset Tag', 'Asset ID', 'Asset Code', 'Asset No', 'Asset Number',
+    'Code', 'Inventory Tag', 'Barcode', 'Hostname', 'Host Name', 'Device ID', 'ID'
+  );
+  let name = cellFromRow(row,
+    'Name', 'Asset Name', 'Description', 'Model', 'Device', 'Device Name',
+    'Item', 'Item Name', 'Product', 'Title', 'Make Model'
+  );
+
+  // Last resort: first non-empty cell → tag, second → name (common unnamed CSV)
+  if (!tag && !name) {
+    const vals = Object.values(row).map((v) => String(v ?? '').trim()).filter(Boolean);
+    if (vals.length >= 1) tag = vals[0];
+    if (vals.length >= 2) name = vals[1];
+  }
   if (!tag && !name) return null;
 
-  const usedByRaw = get('Used By', 'Device User', 'Employee', 'End User');
-  const itOwnerRaw = get('IT Owner', 'Custodian', 'Technician');
-  const legacyAssigned = get('Assigned To', 'Assignee', 'Owner', 'User');
+  const usedByRaw = cellFromRow(row,
+    'Used By', 'Device User', 'Employee', 'End User', 'Staff Name',
+    'User Name', 'Username', 'Allocated To', 'Assigned User'
+  );
+  const itOwnerRaw = cellFromRow(row, 'IT Owner', 'Custodian', 'Technician', 'IT Staff', 'Support Owner');
+  const legacyAssigned = cellFromRow(row, 'Assigned To', 'Assignee', 'Owner', 'User');
   const usedBy = usedByRaw
     ? findOrCreateDeviceUser(usedByRaw)
     : (legacyAssigned && !findStaffByNameOrEmail(legacyAssigned) ? findOrCreateDeviceUser(legacyAssigned) : '');
@@ -934,14 +1044,14 @@ function mapAssetImportRow(row) {
     tag: tag || generateAssetTag(ASSET_TYPE_ALIASES[typeKey] || 'other'),
     name: name || tag || 'Imported Asset',
     type: ASSET_TYPE_ALIASES[typeKey] || ASSET_TYPE_ALIASES[normalizeHeader(rawType)] || 'other',
-    status: ASSET_STATUS_ALIASES[statusKey] || 'active',
-    serial: get('Serial', 'Serial Number', 'S/N', 'SN'),
-    subsidiary: get('Subsidiary', 'Company', 'Entity', 'Business Unit', 'BU'),
-    location: get('Location', 'Site', 'Office'),
+    status: ASSET_STATUS_ALIASES[statusKey] || 'available',
+    serial: cellFromRow(row, 'Serial', 'Serial Number', 'S/N', 'SN', 'Serial No', 'Service Tag'),
+    subsidiary: cellFromRow(row, 'Subsidiary', 'Company', 'Entity', 'Business Unit', 'BU', 'Org', 'Organization', 'Branch'),
+    location: cellFromRow(row, 'Location', 'Site', 'Office', 'Floor', 'Building', 'Room'),
     usedBy,
     assignee,
-    nextMaintenance: excelDateToISO(get('Next Maintenance', 'Maintenance Date', 'Next Service')),
-    notes: get('Notes', 'Comment', 'Comments', 'Remark'),
+    nextMaintenance: excelDateToISO(cellFromRow(row, 'Next Maintenance', 'Maintenance Date', 'Next Service', 'PM Date')),
+    notes: cellFromRow(row, 'Notes', 'Comment', 'Comments', 'Remark', 'Remarks'),
   };
 }
 
@@ -1000,35 +1110,39 @@ async function importAssetsFromFile(file) {
     toast('Excel library not loaded — refresh the page');
     return;
   }
-  const data = await file.arrayBuffer();
-  const wb = XLSX.read(data, { type: 'array', cellDates: true });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+  const matrix = await readAssetImportMatrix(file);
+  const parsed = rowsFromMatrix(matrix);
+  const rows = parsed.rows;
+  const detectedHeaders = parsed.headers;
   if (!rows.length) {
-    toast('No rows found in the sheet');
+    toast('No rows found in the file');
     return;
   }
 
   let added = 0;
   let updated = 0;
   let skipped = 0;
+  let skippedEmpty = 0;
+  let skippedScope = 0;
   const scopeSubs = !isAdmin()
     ? staffSubsidiaries(getCurrentUser()).map(normalizeSubsidiary)
     : [];
 
   rows.forEach((row) => {
+    const blank = Object.values(row).every((v) => v == null || String(v).trim() === '');
+    if (blank) { skippedEmpty++; return; }
     const mapped = mapAssetImportRow(row);
     if (!mapped) { skipped++; return; }
     if (scopeSubs.length) {
       const rowSub = normalizeSubsidiary(mapped.subsidiary);
       if (rowSub && !scopeSubs.includes(rowSub)) {
-        skipped++;
+        skippedScope++;
         return;
       }
       if (!rowSub && scopeSubs.length === 1) {
         mapped.subsidiary = staffSubsidiaries(getCurrentUser())[0];
       } else if (!rowSub) {
-        skipped++;
+        skippedScope++;
         return;
       }
     }
@@ -1061,11 +1175,26 @@ async function importAssetsFromFile(file) {
     }
   });
 
-  saveState();
+  const saved = saveState();
   renderAll();
   const summary = document.getElementById('assetImportSummary');
-  if (summary) summary.textContent = `Import: ${added} added, ${updated} updated, ${skipped} skipped`;
-  toast(`Assets imported — ${added} added, ${updated} updated`);
+  const parts = [`Import: ${added} added, ${updated} updated`];
+  if (skipped) parts.push(`${skipped} skipped (no Tag/Name)`);
+  if (skippedScope) parts.push(`${skippedScope} out of subsidiary scope`);
+  if (skippedEmpty) parts.push(`${skippedEmpty} blank`);
+  if (!saved) parts.push('save failed — storage full');
+  const headerNote = detectedHeaders.length
+    ? ` · columns: ${detectedHeaders.slice(0, 8).join(' | ')}${detectedHeaders.length > 8 ? '…' : ''}`
+    : '';
+  const text = parts.join(', ') + headerNote;
+  if (summary) summary.textContent = text;
+
+  if (added === 0 && updated === 0) {
+    console.warn('Asset import skipped all rows. Columns:', detectedHeaders, 'sample:', rows[0]);
+    toast(`No assets imported. Columns seen: ${detectedHeaders.join(', ') || '(none)'}. Use Download Template headers.`);
+  } else {
+    toast(`Assets imported — ${added} added, ${updated} updated`);
+  }
 }
 
 document.getElementById('downloadAssetTemplateBtn')?.addEventListener('click', downloadAssetTemplate);
@@ -1938,6 +2067,7 @@ function renderStorage() {
     <div class="storage-stat"><span>Purchases</span><strong>${(state.purchases || []).length}</strong></div>
     <div class="storage-stat"><span>Recurring templates</span><strong>${(state.recurringTasks || []).length}</strong></div>
     <div class="storage-stat"><span>Stock SKUs</span><strong>${(state.stockItems || []).length}</strong></div>
+    <div class="storage-stat"><span>Accessory replacements</span><strong>${(state.accessoryReplacements || []).length}</strong></div>
     <div class="storage-stat"><span>Storage used</span><strong>${sizeKB} KB</strong></div>
     <div class="storage-stat"><span>Last saved</span><strong>${state.lastSaved ? new Date(state.lastSaved).toLocaleString() : 'Never'}</strong></div>
   `;
@@ -2258,6 +2388,7 @@ document.getElementById('importFile').addEventListener('change', (e) => {
         purchases: Array.isArray(imported.purchases) ? imported.purchases : [],
         stockItems: Array.isArray(imported.stockItems) ? imported.stockItems : [],
         recurringTasks: Array.isArray(imported.recurringTasks) ? imported.recurringTasks : [],
+        accessoryReplacements: Array.isArray(imported.accessoryReplacements) ? imported.accessoryReplacements : [],
         settings: { ...defaults.settings, ...(imported.settings || {}) },
         automationRules: { ...defaults.automationRules, ...(imported.automationRules || {}) },
       };
@@ -2300,6 +2431,7 @@ function openModal(title, mode, id, bodyHtml) {
       : mode === 'attach' ? 'Save Attachments'
       : mode === 'asset-transfer' ? 'Transfer'
       : mode === 'asset-reassign' ? 'Reassign'
+      : mode === 'accessory-replace' ? 'Save replacement'
       : mode === 'staff-subs' ? 'Save Subsidiaries'
       : mode === 'qr' || mode === 'task-detail' || mode === 'asset-detail' ? 'Close'
       : 'Save';
@@ -2386,6 +2518,11 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
       logAssignment('asset', a.id, `${a.tag} — ${a.name}`, 'User change on transfer', prevUser, a.usedBy, data.notes || '');
     }
     toast(`${a.tag} marked transferred`);
+  } else if (modalMode === 'accessory-replace') {
+    const ok = callHook('submitAccessoryReplace', data, editId);
+    if (ok === false) return;
+    document.getElementById('modal').close();
+    return;
   } else if (modalMode === 'staff-subs') {
     if (!isAdmin()) {
       toast('Only administrators can assign subsidiaries');
