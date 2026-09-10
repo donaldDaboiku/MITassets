@@ -1,0 +1,7 @@
+# Local-only overrides for windows-heartbeat.ps1 (DO NOT COMMIT)
+# Copy to: heartbeat.local.ps1
+
+$HeartbeatUrl = "https://YOUR_PROJECT.supabase.co/functions/v1/heartbeat"
+$HeartbeatSecret = "YOUR_SHARED_SECRET"
+$AgentId = "IT-LP-001"
+$WorkspaceId = "main"
