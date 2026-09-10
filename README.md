@@ -35,9 +35,11 @@ Open the printed URL, hard-refresh once after updates.
 | `js/storage-ui.js` | Storage/settings surface |
 | `js/cloud.js` | Supabase push/pull/restore + heartbeat pull |
 | `js/presence.js` | Network presence reconcile (active ↔ offline) |
+| `js/agents-ui.js` | MIT Asset Agent management |
 | `js/allocation-ui.js` | Device allocation review (approve/reject) |
-| `js/ui-core.js` | Extracted UI (split further over time) |
 | `allocate.html` | Public onboarding form (no login, no API keys) |
+
+Windows endpoint agent is a **separate project**: `../MITAssetAgent/` (not part of this web app folder).
 
 ## Device allocation (paperless handout)
 
@@ -68,6 +70,8 @@ The browser cannot scan your LAN. Laptops report in via a small agent that POSTs
 5. Dashboard shows Online / Offline counts and a stale list; Assets has a **Last seen** column.
 
 Agents use only the heartbeat secret — never staff passwords or the Supabase service role key.
+
+For the full Windows Service agent (unique token per PC), see the sibling project **`../MITAssetAgent/`** and `docs/WINDOWS-AGENT.md`.
 
 ## Default seed accounts (temporary)
 

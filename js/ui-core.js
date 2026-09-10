@@ -458,6 +458,7 @@ const titles = {
   documentation: 'Documentation',
   assignments: 'Assign & Reassign',
   allocations: 'Device Allocations',
+  agents: 'MIT Asset Agents',
   purchases: 'IT Purchases',
   reports: 'Generate Reports',
   scores: 'Staff Score Sheet',
@@ -467,15 +468,44 @@ const titles = {
 };
 
 document.querySelectorAll('.nav-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.nav-btn').forEach((b) => b.classList.remove('active'));
-    document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
-    btn.classList.add('active');
-    const view = btn.dataset.view;
-    document.getElementById('view-' + view).classList.add('active');
-    document.getElementById('pageTitle').textContent = titles[view];
-    renderActiveView();
-    updateNotifBadges();
+  btn.addEventListener('click', () => navigateToView(btn.dataset.view));
+});
+
+function navigateToView(view, opts = {}) {
+  if (!view) return;
+  const target = document.getElementById('view-' + view);
+  if (!target) return;
+  const btn = document.querySelector(`.nav-btn[data-view="${view}"]`);
+  document.querySelectorAll('.nav-btn').forEach((b) => b.classList.remove('active'));
+  document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  target.classList.add('active');
+  if (titles[view]) document.getElementById('pageTitle').textContent = titles[view];
+
+  if (opts.assetStatus !== undefined) {
+    const el = document.getElementById('assetFilterStatus');
+    if (el) el.value = opts.assetStatus;
+  }
+  if (opts.taskStatus !== undefined) {
+    const el = document.getElementById('taskFilterStatus');
+    if (el) el.value = opts.taskStatus;
+  }
+  if (opts.clearTaskDate) {
+    const dateInput = document.getElementById('taskFilterDate');
+    if (dateInput) dateInput.value = '';
+  }
+
+  renderActiveView();
+  updateNotifBadges();
+}
+
+document.getElementById('view-dashboard')?.addEventListener('click', (e) => {
+  const card = e.target.closest('[data-nav-view]');
+  if (!card || !card.classList.contains('stat-card-link')) return;
+  navigateToView(card.dataset.navView, {
+    assetStatus: card.dataset.assetStatus,
+    taskStatus: card.dataset.taskStatus,
+    clearTaskDate: card.dataset.taskDateClear === '1',
   });
 });
 
@@ -2104,6 +2134,9 @@ function renderStorage() {
     </div>`;
   }).join('');
 
+  const staffCountPill = document.getElementById('staffCountPill');
+  if (staffCountPill) staffCountPill.textContent = String(state.staff.length);
+
   const subList = document.getElementById('staffSubsidiaryList');
   if (subList) {
     subList.innerHTML = listSubsidiaries().map((n) => `<option value="${esc(n)}"></option>`).join('');
@@ -2126,6 +2159,8 @@ function renderStorage() {
       }).join('')
       : '<div class="empty-state">No device users yet — add employees who use equipment</div>';
   }
+  const deviceUserCountPill = document.getElementById('deviceUserCountPill');
+  if (deviceUserCountPill) deviceUserCountPill.textContent = String((state.users || []).length);
 
   renderCloudPanel();
   renderFirebasePanel();
@@ -3168,12 +3203,16 @@ function renderSettings() {
     presenceForm.presenceEnabled.checked = !!s.presenceEnabled;
     presenceForm.offlineAfterMinutes.value = s.offlineAfterMinutes ?? 20;
     presenceForm.heartbeatSecret.value = s.heartbeatSecret || '';
+    if (presenceForm.agentEnrollmentKey) presenceForm.agentEnrollmentKey.value = s.agentEnrollmentKey || '';
+    if (presenceForm.agentAdminSecret) presenceForm.agentAdminSecret.value = s.agentAdminSecret || '';
     const urlEl = document.getElementById('heartbeatUrlDisplay');
     if (urlEl) urlEl.value = getHeartbeatUrl() || 'Configure Supabase URL first';
   }
   if (presencePanel) {
-    const secretInput = presenceForm?.querySelector('[name="heartbeatSecret"]');
-    if (secretInput) secretInput.disabled = !admin;
+    ['heartbeatSecret', 'agentEnrollmentKey', 'agentAdminSecret'].forEach((name) => {
+      const input = presenceForm?.querySelector(`[name="${name}"]`);
+      if (input) input.disabled = !admin;
+    });
   }
 
   applyBranding();
@@ -3409,6 +3448,8 @@ document.getElementById('presenceSettingsForm')?.addEventListener('submit', (e) 
   state.settings.offlineAfterMinutes = Math.max(5, Math.min(1440, parseInt(fd.get('offlineAfterMinutes'), 10) || 20));
   if (isAdmin()) {
     state.settings.heartbeatSecret = (fd.get('heartbeatSecret') || '').toString();
+    state.settings.agentEnrollmentKey = (fd.get('agentEnrollmentKey') || '').toString();
+    state.settings.agentAdminSecret = (fd.get('agentAdminSecret') || '').toString();
   }
   saveState({ skipCloud: true });
   if (state.settings.presenceEnabled) {
@@ -3461,6 +3502,7 @@ const VIEW_RENDERERS = {
   documentation: () => renderDocumentation(),
   assignments: () => { populateAssignSelects(); renderAssignmentHistory(); },
   allocations: () => callHook('renderAllocations'),
+  agents: () => callHook('renderAgents'),
   purchases: () => callHook('renderPurchases'),
   scores: () => callHook('renderStaffScores'),
   automation: () => renderAutomation(),

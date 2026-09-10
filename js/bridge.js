@@ -31,6 +31,7 @@ export const hooks = {
   refreshAllocationBadge: null,
   assetAccessorySectionHtml: null,
   submitAccessoryReplace: null,
+  renderAgents: null,
 };
 
 /** Mutable bag shared across modal forms (attachments in progress). */

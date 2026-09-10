@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <title>MIT Asset — IT Operations Hub</title>
-  <link rel="stylesheet" href="styles.css?v=40">
+  <link rel="stylesheet" href="styles.css?v=42">
 </head>
 <body>
   <!-- Login -->
@@ -58,6 +58,7 @@
         <button class="nav-btn" data-view="documentation">Documentation</button>
         <button class="nav-btn" data-view="assignments">Assignments</button>
         <button class="nav-btn" data-view="allocations">Allocations <span class="nav-badge" id="allocationsBadge" hidden>0</span></button>
+        <button class="nav-btn" data-view="agents">Agents</button>
         <button class="nav-btn" data-view="purchases">Purchases</button>
         <button class="nav-btn" data-view="reports">Reports</button>
         <button class="nav-btn" data-view="scores" hidden>Staff scores</button>
@@ -88,52 +89,52 @@
       <!-- Dashboard -->
       <section class="view active" id="view-dashboard">
         <div class="stats-grid">
-          <div class="stat-card">
+          <button type="button" class="stat-card stat-card-link" data-nav-view="assets" title="Open Assets">
             <span class="stat-label">Total Assets</span>
             <span class="stat-value" id="statAssets">0</span>
-          </div>
-          <div class="stat-card">
+          </button>
+          <button type="button" class="stat-card stat-card-link" data-nav-view="tasks" data-task-status="" data-task-date-clear="1" title="Open Task Logs">
             <span class="stat-label">Open Tasks</span>
             <span class="stat-value" id="statOpenTasks">0</span>
-          </div>
-          <div class="stat-card">
+          </button>
+          <button type="button" class="stat-card stat-card-link" data-nav-view="assignments" title="Open Assignments">
             <span class="stat-label">Assigned Items</span>
             <span class="stat-value" id="statAssigned">0</span>
-          </div>
-          <div class="stat-card warn">
+          </button>
+          <button type="button" class="stat-card warn stat-card-link" data-nav-view="tasks" data-task-date-clear="1" title="Open Task Logs">
             <span class="stat-label">Due / Overdue</span>
             <span class="stat-value" id="statOverdue">0</span>
-          </div>
+          </button>
         </div>
 
         <div class="stats-grid" style="margin-top:0">
-          <div class="stat-card">
+          <button type="button" class="stat-card stat-card-link" data-nav-view="assets" data-asset-status="active" title="Open Assets">
             <span class="stat-label">Online (presence)</span>
             <span class="stat-value" id="statOnline">0</span>
-          </div>
-          <div class="stat-card warn">
+          </button>
+          <button type="button" class="stat-card warn stat-card-link" data-nav-view="assets" data-asset-status="offline" title="Open Assets — offline">
             <span class="stat-label">Offline (presence)</span>
             <span class="stat-value" id="statOffline">0</span>
-          </div>
-          <div class="stat-card">
+          </button>
+          <button type="button" class="stat-card stat-card-link" data-nav-view="tasks" data-task-status="resolved" data-task-date-clear="1" title="Open resolved tasks">
             <span class="stat-label">Resolved This Week</span>
             <span class="stat-value" id="statWeekResolved">0</span>
-          </div>
-          <div class="stat-card">
+          </button>
+          <button type="button" class="stat-card stat-card-link" data-nav-view="tasks" data-task-status="open" data-task-date-clear="1" title="Open Task Logs">
             <span class="stat-label">Opened This Week</span>
             <span class="stat-value" id="statWeekOpened">0</span>
-          </div>
+          </button>
         </div>
 
         <div class="stats-grid" style="margin-top:0">
-          <div class="stat-card">
+          <button type="button" class="stat-card stat-card-link" data-nav-view="tasks" data-task-date-clear="1" title="Open Task Logs">
             <span class="stat-label">Avg Time to Resolve</span>
             <span class="stat-value" id="statAvgTtr" style="font-size:1.35rem">—</span>
-          </div>
-          <div class="stat-card" id="backupReminderCard">
+          </button>
+          <button type="button" class="stat-card stat-card-link" id="backupReminderCard" data-nav-view="storage" title="Open Storage &amp; Backup">
             <span class="stat-label">Backup Health</span>
             <span class="stat-value" id="statBackupHealth" style="font-size:1rem">Checking…</span>
-          </div>
+          </button>
         </div>
 
         <div class="panel-grid">
@@ -511,6 +512,39 @@
               <tbody id="allocationsTable"></tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <!-- Agents -->
+      <section class="view" id="view-agents">
+        <div class="stats-grid" id="agentStats"></div>
+        <div class="panel" style="margin-top:1rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+            <div>
+              <h2 style="margin:0">MIT Asset Agents</h2>
+              <p class="hint" id="agentsHint" style="margin:0.35rem 0 0">Per-PC Windows service presence.</p>
+            </div>
+            <button type="button" class="btn btn-secondary" id="agentsRefreshBtn">Refresh</button>
+          </div>
+          <div class="table-wrap" style="margin-top:0.75rem">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset tag</th>
+                  <th>Agent ID</th>
+                  <th>Hostname</th>
+                  <th>Serial</th>
+                  <th>MAC</th>
+                  <th>IP</th>
+                  <th>Version</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="agentsTable"></tbody>
+            </table>
+          </div>
+          <p class="hint" style="margin-top:0.75rem">Windows agent is a separate project: <code>MITAssetAgent</code> (sibling folder to this app). Admin revoke/regenerate needs Agent admin secret in Settings.</p>
         </div>
       </section>
 
@@ -892,7 +926,7 @@
             </div>
             <p class="hint">Free Google backup until you have Namecheap hosting. Paste <code>https://mit-asset-default-rtdb.firebaseio.com</code> in Settings (not the Console page). Rules: <code>firebase-database.rules.json</code>.</p>
           <div class="panel" id="teamPanel">
-            <h2>IT Team Members</h2>
+            <h2>IT Team Members <span class="count-pill" id="staffCountPill">0</span></h2>
             <div id="adminStaffSection">
               <form id="staffForm" class="form form-inline">
                 <input type="text" name="name" placeholder="Name" required />
@@ -909,10 +943,10 @@
               <p class="hint">Change your own login password.</p>
               <button type="button" class="btn btn-primary" id="changeMyPasswordBtn">Change My Password</button>
             </div>
-            <div id="staffList" class="staff-list"></div>
+            <div id="staffList" class="staff-list staff-list-scroll"></div>
           </div>
           <div class="panel" id="deviceUsersPanel">
-            <h2>Device Users</h2>
+            <h2>Device Users <span class="count-pill" id="deviceUserCountPill">0</span></h2>
             <p class="hint">Employees who use equipment (not for login). Import from Excel/CSV (Name, Email, Department, Subsidiary). Word (.docx) is not supported — export that list to Excel first.</p>
             <form id="deviceUserForm" class="form form-inline">
               <input type="text" name="name" placeholder="Full name" required />
@@ -930,7 +964,7 @@
               <button type="button" class="btn btn-ghost" id="exportUsersBtn">Export Users</button>
               <span class="hint" id="userImportSummary" style="margin:0"></span>
             </div>
-            <div id="deviceUserList" class="staff-list"></div>
+            <div id="deviceUserList" class="staff-list staff-list-scroll"></div>
           </div>
           <div class="panel danger-zone" id="dangerZonePanel">
             <h2>Danger Zone</h2>
@@ -1017,7 +1051,7 @@
           </div>
           <div class="panel" id="presenceSettingsPanel">
             <h2>Network Presence</h2>
-            <p class="hint">Mark devices Active when a heartbeat arrives; Offline after the timeout. The browser cannot scan Wi‑Fi — use the per-laptop scripts in <code>agents/</code>.</p>
+            <p class="hint">Mark devices Active when a heartbeat arrives; Offline after the timeout. Prefer the Windows service project <code>MITAssetAgent</code> (sibling folder — unique token per PC). Legacy script: <code>agents/</code>.</p>
             <form id="presenceSettingsForm" class="form">
               <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
                 Enable presence monitoring
@@ -1026,12 +1060,19 @@
               <label>Offline after (minutes)
                 <input type="number" name="offlineAfterMinutes" min="5" max="1440" value="20" />
               </label>
-              <label>Heartbeat shared secret <span class="hint-inline">(admin — for agents / Edge Function)</span>
-                <input type="password" name="heartbeatSecret" autocomplete="off" placeholder="Set same value as HEARTBEAT_SECRET" />
+              <label>Legacy heartbeat shared secret <span class="hint-inline">(old PowerShell agent only)</span>
+                <input type="password" name="heartbeatSecret" autocomplete="off" placeholder="HEARTBEAT_SECRET" />
               </label>
-              <label>Heartbeat URL
+              <label>Agent enrollment key <span class="hint-inline">(admin — AGENT_ENROLLMENT_KEY for register-agent)</span>
+                <input type="password" name="agentEnrollmentKey" autocomplete="off" placeholder="Used only at PC install" />
+              </label>
+              <label>Agent admin secret <span class="hint-inline">(revoke / regenerate tokens)</span>
+                <input type="password" name="agentAdminSecret" autocomplete="off" placeholder="Defaults to enrollment key if empty" />
+              </label>
+              <label>Legacy Heartbeat URL
                 <input type="text" id="heartbeatUrlDisplay" readonly placeholder="Configure Supabase URL first" />
               </label>
+              <p class="hint">New agent URLs: <code>…/functions/v1/register-agent</code> and <code>…/functions/v1/agent-heartbeat</code></p>
               <div class="workflow-btns">
                 <button type="submit" class="btn btn-primary">Save Presence Settings</button>
                 <button type="button" class="btn btn-secondary" id="pullHeartbeatsBtn">Pull heartbeats now</button>

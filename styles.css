@@ -523,6 +523,28 @@ dialog.wide {
   gap: 0.35rem;
 }
 
+button.stat-card {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+.stat-card-link {
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+}
+
+.stat-card-link:hover {
+  border-color: var(--primary);
+  background: var(--surface2);
+}
+
+.stat-card-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 .stat-card.warn {
   border-color: var(--warning);
 }
@@ -1025,6 +1047,28 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.staff-list-scroll {
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem;
+  background: var(--surface2);
+}
+
+.count-pill {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: middle;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--primary);
 }
 
 .staff-card {

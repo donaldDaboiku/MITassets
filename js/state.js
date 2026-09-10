@@ -71,6 +71,8 @@ export function defaultState() {
       presenceEnabled: false,
       offlineAfterMinutes: 20,
       heartbeatSecret: '',
+      agentEnrollmentKey: '',
+      agentAdminSecret: '',
       itBudgetAmount: 0,
       itBudgetSupplementary: 0,
       itBudgetCurrency: 'NGN',

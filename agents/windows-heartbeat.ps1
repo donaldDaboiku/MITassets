@@ -4,9 +4,9 @@
 # 2. Save as C:\IT\mit-heartbeat.ps1
 # 3. Schedule every 5 minutes (Task Scheduler → Create Basic Task → trigger: 5 min).
 
-$HeartbeatUrl = "https://YOUR_PROJECT.supabase.co/functions/v1/heartbeat"
-$HeartbeatSecret = "YOUR_SHARED_SECRET"
-$AgentId = "IT-LP-001"   # Use the asset tag from MIT Asset (or a stable serial)
+$HeartbeatUrl = "https://wjkijzoizbtusqoasjjb.supabase.co/functions/v1/heartbeat"
+$HeartbeatSecret = "65QcqS0rZCknyRK32wOjza8bEBP4vDYs"
+$AgentId = "MSC065"   # must match the asset Tag in MIT Asset   # Use the asset tag from MIT Asset (or a stable serial)
 
 $hostname = $env:COMPUTERNAME
 $mac = (Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.MacAddress } | Select-Object -First 1).MacAddress
