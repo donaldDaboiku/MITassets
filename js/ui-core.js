@@ -11,7 +11,7 @@ import {
   unreadCount, getSessionUserId, setSession, clearSession, getCurrentUser,
   isAdmin, assetsInScope, canManageAsset, listSubsidiaries, normalizeSubsidiary,
   staffSubsidiaries, parseSubsidiaryInput, assetHistory,
-  assetTypeToTaskCategory, wireAssetTagField,
+  assetTypeToTaskCategory, wireAssetTagField, taskCategoryOptions,
 } from './state.js';
 import {
   hashPassword, ensureStaffAuth, repairAllStaffLogins,
@@ -1503,9 +1503,7 @@ function taskFormFields(t = {}) {
     <label>Title <input name="title" value="${esc(t.title || '')}" required /></label>
     <label>Category <span class="hint-inline">(auto-fills when you pick a linked asset)</span>
       <select name="category">
-        ${['hardware','software','network','security','onboarding','maintenance','other'].map((c) =>
-          `<option value="${c}" ${t.category === c ? 'selected' : ''}>${c}</option>`
-        ).join('')}
+        ${taskCategoryOptions(t.category || 'hardware')}
       </select>
     </label>
     <label>Priority

@@ -9,6 +9,32 @@ export const TYPE_CODES = {
   network: 'NW', software: 'SW', other: 'OT',
 };
 
+/** Task / documentation categories (value === label for badges). */
+export const TASK_CATEGORIES = [
+  'hardware',
+  'software',
+  'network',
+  'security',
+  'subscription', // Starlink, ISP, SaaS, router plans, renewals
+  'telecom',      // airtime, SIM, phone lines
+  'access',       // accounts, email, permissions
+  'support',      // general user / helpdesk
+  'cloud',        // hosting, tenants, backups
+  'onboarding',
+  'maintenance',
+  'other',
+];
+
+export function taskCategoryOptions(selected = '') {
+  const cur = String(selected || '');
+  const list = TASK_CATEGORIES.includes(cur) || !cur
+    ? TASK_CATEGORIES
+    : [...TASK_CATEGORIES, cur];
+  return list.map((c) =>
+    `<option value="${c}" ${c === cur ? 'selected' : ''}>${c}</option>`
+  ).join('');
+}
+
 export function defaultState() {
   return {
     assets: [],
