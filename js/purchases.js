@@ -263,13 +263,20 @@ function formatFileSize(bytes) {
 
 function receiptPreviewHtml(receipt) {
   if (!receipt) return '<p class="hint" style="margin:0">No receipt attached.</p>';
-  const isImg = (receipt.type || '').startsWith('image/');
+  const offloaded = !!(receipt.offloaded && !receipt.dataUrl);
+  const isImg = !offloaded && (receipt.type || '').startsWith('image/') && receipt.dataUrl;
+  const link = offloaded
+    ? `<span>${esc(receipt.name)}</span>`
+    : `<a href="${receipt.dataUrl}" download="${esc(receipt.name)}" target="_blank" rel="noopener">${esc(receipt.name)}</a>`;
+  const meta = offloaded
+    ? `${formatFileSize(receipt.size)} · in cloud — Restore from Cloud to view`
+    : formatFileSize(receipt.size);
   return `
     <div class="attach-chip">
-      ${isImg ? `<img src="${receipt.dataUrl}" alt="" class="attach-thumb" />` : '<span class="attach-file-icon">📄</span>'}
+      ${isImg ? `<img src="${receipt.dataUrl}" alt="" class="attach-thumb" />` : `<span class="attach-file-icon">${offloaded ? '☁' : '📄'}</span>`}
       <div class="attach-meta">
-        <a href="${receipt.dataUrl}" download="${esc(receipt.name)}" target="_blank" rel="noopener">${esc(receipt.name)}</a>
-        <span>${formatFileSize(receipt.size)}</span>
+        ${link}
+        <span>${meta}</span>
       </div>
       <button type="button" class="btn btn-sm btn-danger" id="clearReceiptBtn">Remove</button>
     </div>`;
@@ -465,7 +472,9 @@ function renderPurchaseTable() {
     const when = p.purchasedAt ? new Date(p.purchasedAt).toLocaleString() : '—';
     const qty = `${Number(p.quantity) || 1} ${esc(p.unit || 'pcs')}`;
     const receipt = p.receipt
-      ? `<a href="${p.receipt.dataUrl}" download="${esc(p.receipt.name)}" target="_blank" rel="noopener">View</a>`
+      ? (p.receipt.offloaded && !p.receipt.dataUrl
+        ? `<span title="In cloud backup">☁ ${esc(p.receipt.name || 'Receipt')}</span>`
+        : `<a href="${p.receipt.dataUrl}" download="${esc(p.receipt.name)}" target="_blank" rel="noopener">View</a>`)
       : '—';
     return `
       <tr>

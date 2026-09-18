@@ -139,6 +139,110 @@ export let state = loadState();
 let lastQuotaToastAt = 0;
 const QUOTA_TOAST_INTERVAL_MS = 8000;
 
+/**
+ * Clear base64 payload from a file object (keeps name/size/type for UI).
+ * Full file remains in the last successful cloud/Firebase backup.
+ */
+export function offloadFileBlob(file) {
+  if (!file || typeof file !== 'object') return false;
+  if (!file.dataUrl) return false;
+  file.dataUrl = '';
+  file.offloaded = true;
+  return true;
+}
+
+function offloadAttachmentList(list) {
+  if (!Array.isArray(list)) return 0;
+  let n = 0;
+  list.forEach((f) => { if (offloadFileBlob(f)) n++; });
+  return n;
+}
+
+export function hasOffloadedBlobs() {
+  const tasks = state.tasks || [];
+  for (const t of tasks) {
+    if ((t.attachments || []).some((a) => a && a.offloaded && !a.dataUrl)) return true;
+  }
+  for (const d of state.documentation || []) {
+    if ((d.attachments || []).some((a) => a && a.offloaded && !a.dataUrl)) return true;
+  }
+  for (const p of state.purchases || []) {
+    if (p.receipt && p.receipt.offloaded && !p.receipt.dataUrl) return true;
+  }
+  return false;
+}
+
+/**
+ * Free localStorage by dropping file blobs already kept in cloud backup.
+ * Soft (default): closed tasks + their docs + purchase receipts.
+ * Aggressive: also any remaining task/doc attachments (quota recovery).
+ */
+export function pruneLocalHeavyData({ aggressive = false } = {}) {
+  let freed = 0;
+  const tasks = state.tasks || [];
+
+  tasks.forEach((t) => {
+    if (aggressive || t.status === 'closed') {
+      freed += offloadAttachmentList(t.attachments);
+    }
+  });
+
+  (state.documentation || []).forEach((d) => {
+    const task = tasks.find((t) => t.id === d.taskId);
+    const closed = task?.status === 'closed';
+    if (closed || aggressive || !task) freed += offloadAttachmentList(d.attachments);
+  });
+
+  (state.purchases || []).forEach((p) => {
+    if (p.receipt && offloadFileBlob(p.receipt)) freed++;
+  });
+
+  if (Array.isArray(state.notifications) && state.notifications.length > 40) {
+    state.notifications.length = 40;
+    freed++;
+  }
+  if (Array.isArray(state.automationLog) && state.automationLog.length > 30) {
+    state.automationLog.length = 30;
+    freed++;
+  }
+
+  return freed;
+}
+
+/** Copy dataUrl blobs from a cloud/Firebase payload onto matching local offloaded files. */
+export function rehydrateBlobsFromPayload(payload) {
+  if (!payload || typeof payload !== 'object') return 0;
+  const map = new Map();
+  const index = (list) => {
+    (list || []).forEach((a) => {
+      if (a?.id && a.dataUrl) map.set(a.id, a.dataUrl);
+    });
+  };
+  (payload.tasks || []).forEach((t) => index(t.attachments));
+  (payload.documentation || []).forEach((d) => index(d.attachments));
+  (payload.purchases || []).forEach((p) => {
+    if (p?.receipt?.id && p.receipt.dataUrl) map.set(p.receipt.id, p.receipt.dataUrl);
+  });
+  if (!map.size) return 0;
+
+  let n = 0;
+  const fill = (f) => {
+    if (!f?.id || f.dataUrl) return;
+    if (!map.has(f.id)) return;
+    f.dataUrl = map.get(f.id);
+    f.offloaded = false;
+    n++;
+  };
+  (state.tasks || []).forEach((t) => (t.attachments || []).forEach(fill));
+  (state.documentation || []).forEach((d) => (d.attachments || []).forEach(fill));
+  (state.purchases || []).forEach((p) => { if (p.receipt) fill(p.receipt); });
+  return n;
+}
+
+function cloudBackupKnown() {
+  return !!(state.settings?.lastCloudPushAt || state.settings?.lastFirebasePushAt);
+}
+
 export function applyState(next) {
   state = next;
   return state;
@@ -147,27 +251,56 @@ export function applyState(next) {
 export function saveState(opts = {}) {
   const prevLastSaved = state.lastSaved;
   const stamp = new Date().toISOString();
-  try {
+  const write = () => {
     state.lastSaved = stamp;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  };
+  try {
+    write();
   } catch (err) {
     state.lastSaved = prevLastSaved;
     if (err?.name === 'QuotaExceededError') {
-      // ponytail: keep the app usable when embedded attachments exceed localStorage quota.
-      const el = document.getElementById('lastSaved');
-      if (el) el.textContent = 'Save failed — storage full';
-      const now = Date.now();
-      if (now - lastQuotaToastAt >= QUOTA_TOAST_INTERVAL_MS) {
-        toast('Local storage is full. Remove some large attachments or use cloud backup/export.');
-        lastQuotaToastAt = now;
+      // Auto-free space when a cloud/Firebase backup already holds the file blobs.
+      let recovered = false;
+      if (cloudBackupKnown()) {
+        const freed = pruneLocalHeavyData({ aggressive: true });
+        if (freed > 0) {
+          try {
+            write();
+            recovered = true;
+            const elOk = document.getElementById('lastSaved');
+            if (elOk) elOk.textContent = 'Saved ' + new Date(stamp).toLocaleString() + ' · local files offloaded';
+            const now = Date.now();
+            if (now - lastQuotaToastAt >= QUOTA_TOAST_INTERVAL_MS) {
+              toast(`Local storage was full — cleared ${freed} backed-up file(s) locally. Restore from Cloud to view them.`);
+              lastQuotaToastAt = now;
+            }
+          } catch (_) {
+            recovered = false;
+          }
+        }
       }
-      console.warn('Local save skipped: storage quota exceeded');
-      return false;
+      if (!recovered) {
+        const el = document.getElementById('lastSaved');
+        if (el) el.textContent = 'Save failed — storage full';
+        const now = Date.now();
+        if (now - lastQuotaToastAt >= QUOTA_TOAST_INTERVAL_MS) {
+          toast(cloudBackupKnown()
+            ? 'Local storage is still full after cleanup. Export JSON or remove large open-task attachments.'
+            : 'Local storage is full. Push to Cloud first — then local copies of backed-up files are cleared automatically.');
+          lastQuotaToastAt = now;
+        }
+        console.warn('Local save skipped: storage quota exceeded');
+        return false;
+      }
+    } else {
+      throw err;
     }
-    throw err;
   }
   const el = document.getElementById('lastSaved');
-  if (el) el.textContent = 'Saved ' + new Date(stamp).toLocaleString();
+  if (el && !String(el.textContent || '').includes('offloaded')) {
+    el.textContent = 'Saved ' + new Date(stamp).toLocaleString();
+  }
   if (!opts.skipCloud) {
     callHook('scheduleCloudPush');
     callHook('scheduleFirebasePush');

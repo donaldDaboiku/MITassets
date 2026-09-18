@@ -3114,15 +3114,24 @@ function attachmentsMarkup(list, { editable = true } = {}) {
   const chips = items.length
     ? items.map((a) => {
       const isImg = isImageType(a.type, a.name);
-      const thumb = isImg
-        ? `<img src="${a.dataUrl}" alt="" class="attach-thumb" />`
-        : `<span class="attach-file-icon">📄</span>`;
+      const offloaded = !!(a.offloaded && !a.dataUrl);
+      const thumb = offloaded
+        ? `<span class="attach-file-icon" title="In cloud backup">☁</span>`
+        : (isImg && a.dataUrl
+          ? `<img src="${a.dataUrl}" alt="" class="attach-thumb" />`
+          : `<span class="attach-file-icon">📄</span>`);
+      const link = offloaded
+        ? `<span>${esc(a.name)}</span>`
+        : `<a href="${a.dataUrl}" download="${esc(a.name)}" target="_blank" rel="noopener">${esc(a.name)}</a>`;
+      const meta = offloaded
+        ? `${formatFileSize(a.size)} · in cloud — Restore from Cloud to view`
+        : `${formatFileSize(a.size)} · ${esc((a.type || '').split('/')[1] || 'file')}`;
       return `
         <div class="attach-chip" data-attach-id="${a.id}">
           ${thumb}
           <div class="attach-meta">
-            <a href="${a.dataUrl}" download="${esc(a.name)}" target="_blank" rel="noopener">${esc(a.name)}</a>
-            <span>${formatFileSize(a.size)} · ${esc((a.type || '').split('/')[1] || 'file')}</span>
+            ${link}
+            <span>${meta}</span>
           </div>
           ${editable ? `<button type="button" class="btn btn-sm btn-danger" data-remove-attach="${a.id}">Remove</button>` : ''}
         </div>`;

@@ -5,6 +5,7 @@
 import { toast } from './utils.js';
 import {
   state, saveState, STORAGE_KEY,
+  hasOffloadedBlobs, rehydrateBlobsFromPayload, pruneLocalHeavyData,
 } from './state.js';
 import { applyCloudPayload } from './cloud.js';
 import { setHook, callHook } from './bridge.js';
@@ -146,6 +147,18 @@ function setFirebaseStatus(text, isError = false) {
   el.classList.toggle('cloud-error', isError);
 }
 
+async function fetchFirebasePayload() {
+  state.settings.firebaseDatabaseUrl = normalizeFirebaseDatabaseUrl(state.settings.firebaseDatabaseUrl);
+  const res = await firebaseFetch(firebaseRefUrl(), {}, pushTimeoutMs(0));
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(errText || `HTTP ${res.status}`);
+  }
+  const payload = await res.json();
+  if (!payload || typeof payload !== 'object') return null;
+  return payload;
+}
+
 export async function pullFromFirebase({ silent = false } = {}) {
   if (!firebaseConfigured()) {
     if (!silent) toast('Enable Firebase backup in Settings first');
@@ -159,17 +172,11 @@ export async function pullFromFirebase({ silent = false } = {}) {
   setFirebaseStatus('Pulling from Firebase…');
   renderFirebasePanel();
   try {
-    state.settings.firebaseDatabaseUrl = normalizeFirebaseDatabaseUrl(state.settings.firebaseDatabaseUrl);
-    const res = await firebaseFetch(firebaseRefUrl(), {}, pushTimeoutMs(0));
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(errText || `HTTP ${res.status}`);
-    }
-    const payload = await res.json();
+    const payload = await fetchFirebasePayload();
     rememberFirebasePullAt(new Date().toISOString());
     lastFirebaseError = null;
     persistFirebaseMetaLocally();
-    if (!payload || typeof payload !== 'object') {
+    if (!payload) {
       setFirebaseStatus('Firebase empty — click Push to Firebase to create the first backup');
       if (!silent) toast('No Firebase data yet — click Push to Firebase');
       return null;
@@ -197,6 +204,16 @@ export async function pushToFirebase({ silent = false } = {}) {
     if (!silent) toast('Firebase sync already in progress…');
     return false;
   }
+
+  if (hasOffloadedBlobs()) {
+    try {
+      const payload = await fetchFirebasePayload();
+      if (payload) rehydrateBlobsFromPayload(payload);
+    } catch (err) {
+      console.warn('rehydrate before Firebase push', err);
+    }
+  }
+
   firebaseBusy = true;
   setFirebaseStatus('Pushing to Firebase…');
   renderFirebasePanel();
@@ -217,9 +234,23 @@ export async function pushToFirebase({ silent = false } = {}) {
     }
     rememberFirebasePushAt(new Date().toISOString());
     lastFirebaseError = null;
-    setFirebaseStatus(`Synced to Firebase · ${new Date(lastFirebasePushAt).toLocaleString()}`);
+
+    // Prefer Supabase as primary backup for prune; still prune if Firebase-only setup
+    const cloudOn = !!(state.settings.cloudEnabled && state.settings.supabaseUrl);
+    const freed = cloudOn ? 0 : pruneLocalHeavyData({ aggressive: false });
+    if (freed) saveState({ skipCloud: true });
+
+    setFirebaseStatus(
+      freed
+        ? `Synced to Firebase · local offload ${freed} · ${new Date(lastFirebasePushAt).toLocaleString()}`
+        : `Synced to Firebase · ${new Date(lastFirebasePushAt).toLocaleString()}`
+    );
     persistFirebaseMetaLocally();
-    if (!silent) toast('Saved to Firebase');
+    if (!silent) {
+      toast(freed
+        ? `Saved to Firebase — freed local space (${freed} file(s))`
+        : 'Saved to Firebase');
+    }
     return true;
   } catch (err) {
     lastFirebaseError = friendlyFirebaseError(err);

@@ -2,6 +2,7 @@
 import { toast } from './utils.js';
 import {
   state, saveState, applyState, defaultState, STORAGE_KEY,
+  hasOffloadedBlobs, rehydrateBlobsFromPayload, pruneLocalHeavyData,
 } from './state.js';
 import { setHook, callHook } from './bridge.js';
 
@@ -135,6 +136,22 @@ function friendlyCloudError(err, statusText = '') {
   return msg.length > 180 ? `${msg.slice(0, 180)}…` : msg;
 }
 
+/** Fetch workspace row without taking the cloudBusy lock (for rehydrate-during-push). */
+async function fetchCloudWorkspaceRow() {
+  const id = encodeURIComponent(cloudWorkspaceId());
+  const res = await cloudFetch(
+    `${cloudBaseUrl()}/rest/v1/mit_workspace?workspace_id=eq.${id}&select=payload,updated_at`,
+    { headers: cloudHeaders() },
+    cloudPullTimeoutMs()
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(errText || `HTTP ${res.status}`);
+  }
+  const rows = await res.json();
+  return rows[0] || null;
+}
+
 export async function pullFromCloud({ silent = false } = {}) {
   if (!cloudConfigured()) {
     if (!silent) toast('Enable cloud sync in Settings first');
@@ -148,28 +165,18 @@ export async function pullFromCloud({ silent = false } = {}) {
   setCloudStatus('Pulling from cloud…');
   renderCloudPanel();
   try {
-    const id = encodeURIComponent(cloudWorkspaceId());
-    const res = await cloudFetch(
-      `${cloudBaseUrl()}/rest/v1/mit_workspace?workspace_id=eq.${id}&select=payload,updated_at`,
-      { headers: cloudHeaders() },
-      cloudPullTimeoutMs()
-    );
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(errText || `HTTP ${res.status}`);
-    }
-    const rows = await res.json();
+    const row = await fetchCloudWorkspaceRow();
     rememberPullAt(new Date().toISOString());
     lastCloudError = null;
     persistCloudMetaLocally();
-    if (!rows.length) {
+    if (!row) {
       setCloudStatus('Cloud workspace empty — click Push to Cloud to create the first backup');
       if (!silent) toast('No cloud data yet — click Push to Cloud');
       return null;
     }
-    setCloudStatus(`Cloud ready · last updated ${new Date(rows[0].updated_at).toLocaleString()}`);
+    setCloudStatus(`Cloud ready · last updated ${new Date(row.updated_at).toLocaleString()}`);
     if (!silent) toast('Cloud data checked');
-    return rows[0];
+    return row;
   } catch (err) {
     lastCloudError = friendlyCloudError(err);
     setCloudStatus(`Cloud error: ${lastCloudError}`, true);
@@ -190,6 +197,17 @@ export async function pushToCloud({ silent = false } = {}) {
     if (!silent) toast('Cloud sync already in progress…');
     return false;
   }
+
+  // Don't overwrite cloud with empty file blobs after local offload
+  if (hasOffloadedBlobs()) {
+    try {
+      const row = await fetchCloudWorkspaceRow();
+      if (row?.payload) rehydrateBlobsFromPayload(row.payload);
+    } catch (err) {
+      console.warn('rehydrate before push', err);
+    }
+  }
+
   cloudBusy = true;
   const payload = JSON.parse(JSON.stringify(state));
   const body = {
@@ -217,9 +235,26 @@ export async function pushToCloud({ silent = false } = {}) {
     }
     rememberPushAt(new Date().toISOString());
     lastCloudError = null;
-    setCloudStatus(`Synced to cloud · ${new Date(lastCloudPushAt).toLocaleString()}`);
+
+    // Local copies of closed-task files / receipts can go — cloud has them now
+    const freed = pruneLocalHeavyData({ aggressive: false });
+    const saved = saveState({ skipCloud: true });
+    if (!saved && freed) {
+      pruneLocalHeavyData({ aggressive: true });
+      saveState({ skipCloud: true });
+    }
+
+    setCloudStatus(
+      freed
+        ? `Synced to cloud · local offload ${freed} file(s) · ${new Date(lastCloudPushAt).toLocaleString()}`
+        : `Synced to cloud · ${new Date(lastCloudPushAt).toLocaleString()}`
+    );
     persistCloudMetaLocally();
-    if (!silent) toast('Saved to cloud');
+    if (!silent) {
+      toast(freed
+        ? `Saved to cloud — freed local space (${freed} backed-up file(s) offloaded)`
+        : 'Saved to cloud');
+    }
     return true;
   } catch (err) {
     lastCloudError = friendlyCloudError(err);
