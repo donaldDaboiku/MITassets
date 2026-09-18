@@ -240,6 +240,13 @@ export function scheduleFirebasePush() {
   }, FIREBASE_SYNC_DELAY_MS);
 }
 
+export function flushFirebasePush() {
+  if (!firebaseConfigured() || state.settings.autoSyncFirebase === false) return Promise.resolve(false);
+  clearTimeout(firebaseSyncTimer);
+  firebaseSyncTimer = null;
+  return pushToFirebase({ silent: true });
+}
+
 export async function restoreFromFirebase() {
   const row = await pullFromFirebase({ silent: true });
   if (!row?.payload) {
@@ -308,6 +315,7 @@ export function renderFirebasePanel() {
 
 export function registerFirebaseHooks() {
   setHook('scheduleFirebasePush', scheduleFirebasePush);
+  setHook('flushFirebasePush', flushFirebasePush);
   setHook('renderFirebasePanel', renderFirebasePanel);
   hydrateFirebaseTimestamps();
 }

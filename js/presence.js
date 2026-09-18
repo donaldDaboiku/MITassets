@@ -98,8 +98,8 @@ export function reconcilePresence({ save = true, silent = true } = {}) {
 }
 
 /**
- * Merge heartbeat rows into local assets (match agentId or asset tag).
- * @param {Array<{ agent_id?: string, asset_tag?: string, last_seen?: string, hostname?: string, mac_address?: string }>} rows
+ * Merge heartbeat / agent rows into local assets.
+ * Matches by agentId, asset tag, serial, MAC, or hostname.
  */
 export function applyHeartbeatsToAssets(rows, { save = true } = {}) {
   if (!Array.isArray(rows) || !rows.length) {
@@ -115,6 +115,10 @@ export function applyHeartbeatsToAssets(rows, { save = true } = {}) {
 
     const rowMac = normalizeMac(row.mac_address || row.macAddress || '');
     const agentAsMac = normalizeMac(agentId);
+    const serial = String(row.serial_number || row.serialNumber || row.serial || '').trim().toLowerCase();
+    const host = String(row.hostname || '').trim().toLowerCase();
+    const meta = row.meta && typeof row.meta === 'object' ? row.meta : {};
+    const metaSerial = String(meta.BiosSerial || meta.biosSerial || meta.serial || '').trim().toLowerCase();
 
     const asset = state.assets.find((a) => {
       ensureAssetPresenceFields(a);
@@ -122,9 +126,13 @@ export function applyHeartbeatsToAssets(rows, { save = true } = {}) {
       if (agentId && a.tag && a.tag.toLowerCase() === agentId.toLowerCase()) return true;
       if (tag && a.tag && a.tag.toLowerCase() === tag.toLowerCase()) return true;
       if (agentId && a.serial && a.serial.toLowerCase() === agentId.toLowerCase()) return true;
+      if (serial && a.serial && a.serial.toLowerCase() === serial) return true;
+      if (metaSerial && a.serial && a.serial.toLowerCase() === metaSerial) return true;
       const assetMac = normalizeMac(a.macAddress);
       if (rowMac.length === 12 && assetMac === rowMac) return true;
       if (agentAsMac.length === 12 && assetMac === agentAsMac) return true;
+      if (host && a.tag && a.tag.toLowerCase() === host) return true;
+      if (host && a.name && a.name.toLowerCase() === host) return true;
       return false;
     });
     if (!asset) return;
@@ -134,10 +142,12 @@ export function applyHeartbeatsToAssets(rows, { save = true } = {}) {
     if (Number.isNaN(next) || next < prev) return;
 
     asset.lastSeenAt = new Date(lastSeen).toISOString();
-    if (agentId && !asset.agentId) asset.agentId = agentId;
+    if (agentId) asset.agentId = agentId;
     if (row.mac_address || row.macAddress) {
       asset.macAddress = row.mac_address || row.macAddress;
     }
+    if (serial && !asset.serial) asset.serial = String(row.serial_number || row.serialNumber || row.serial).trim();
+    // Only auto-flip active ↔ offline (never available / maintenance / etc.)
     if (PRESENCE_STATUSES.has(asset.status)) {
       asset.status = 'active';
     }
@@ -148,6 +158,11 @@ export function applyHeartbeatsToAssets(rows, { save = true } = {}) {
   return { updated };
 }
 
+/**
+ * Dashboard / presence counts for devices that report heartbeats.
+ * Includes available assets that have lastSeenAt / agentId (display only —
+ * reconcilePresence still only toggles active ↔ offline).
+ */
 export function presenceStats() {
   const now = Date.now();
   let online = 0;
@@ -157,11 +172,13 @@ export function presenceStats() {
   state.assets.forEach((a) => {
     ensureAssetPresenceFields(a);
     if (!canManageAsset(a)) return;
-    if (!['active', 'offline'].includes(a.status)) return;
+    const monitored = !!(a.lastSeenAt || a.agentId || normalizeMac(a.macAddress));
+    const presenceStatus = ['active', 'offline'].includes(a.status);
+    if (!monitored && !presenceStatus) return;
 
     if (isAssetOnline(a, now)) {
       online++;
-    } else {
+    } else if (a.lastSeenAt || presenceStatus) {
       offline++;
       stale.push(a);
     }
@@ -173,7 +190,7 @@ export function presenceStats() {
     return ta - tb;
   });
 
-  return { online, offline, stale };
+  return { online, offline, stale, monitored: online + offline };
 }
 
 export function startPresencePolling(intervalMs = 60_000) {

@@ -135,13 +135,30 @@ function renderTable() {
 
 export async function renderAgents() {
   const hint = document.getElementById('agentsHint');
+  const mins = Math.round(getOfflineAfterMs() / 60000);
   if (hint) {
     hint.textContent = isPresenceEnabled()
-      ? `Offline after ${Math.round(getOfflineAfterMs() / 60000)} minutes without heartbeat.`
-      : 'Enable Network Presence in Settings for active/offline classification.';
+      ? `Online = last heartbeat within ${mins} min. Offline after that. Dashboard updates when you Pull heartbeats / poll.`
+      : `Enable Network Presence in Settings for dashboard Online/Offline + auto asset status. Agents below still show online if last seen ≤ ${mins} min.`;
   }
   try {
     await fetchAgents();
+    // Sync agent last_seen onto matching assets (serial / MAC / tag / hostname)
+    const { applyHeartbeatsToAssets, reconcilePresence } = await import('./presence.js');
+    applyHeartbeatsToAssets(
+      cachedAgents
+        .filter((a) => a.last_seen && a.status !== 'disabled' && !a.token_revoked)
+        .map((a) => ({
+          agent_id: a.agent_id,
+          asset_tag: a.asset_tag,
+          hostname: a.hostname,
+          serial_number: a.serial_number,
+          mac_address: a.mac_address,
+          last_seen: a.last_seen,
+        })),
+      { save: true }
+    );
+    reconcilePresence({ save: true, silent: true });
   } catch (err) {
     lastError = String(err.message || err);
     cachedAgents = [];

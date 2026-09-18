@@ -240,6 +240,14 @@ export function scheduleCloudPush() {
   }, CLOUD_SYNC_DELAY_MS);
 }
 
+/** Immediate cloud push (e.g. after resolve/close so reopen keeps status). */
+export function flushCloudPush() {
+  if (!cloudConfigured() || !state.settings.autoSyncCloud) return Promise.resolve(false);
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = null;
+  return pushToCloud({ silent: true });
+}
+
 export function applyCloudPayload(payload) {
   if (!payload || typeof payload !== 'object') return false;
   const defaults = defaultState();
@@ -351,13 +359,14 @@ export function renderCloudPanel() {
 /** Register scheduleCloudPush on bridge (called from main). */
 export function registerCloudHooks() {
   setHook('scheduleCloudPush', scheduleCloudPush);
+  setHook('flushCloudPush', flushCloudPush);
   setHook('renderCloudPanel', renderCloudPanel);
   setHook('pullHeartbeats', pullHeartbeats);
   hydrateCloudTimestamps();
 }
 
 /**
- * Read mit_heartbeats for this workspace (anon SELECT) and merge into assets.
+ * Read mit_heartbeats + mit_agents for this workspace and merge into assets.
  */
 export async function pullHeartbeats({ silent = false } = {}) {
   if (!cloudConfigured()) {
@@ -366,19 +375,49 @@ export async function pullHeartbeats({ silent = false } = {}) {
   }
   try {
     const id = encodeURIComponent(cloudWorkspaceId());
-    const res = await cloudFetch(
-      `${cloudBaseUrl()}/rest/v1/mit_heartbeats?workspace_id=eq.${id}&select=agent_id,asset_tag,hostname,mac_address,last_seen,meta&order=last_seen.desc`,
-      { headers: cloudHeaders() }
-    );
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(errText || `HTTP ${res.status}`);
+    const headers = cloudHeaders();
+    const [hbRes, agRes] = await Promise.all([
+      cloudFetch(
+        `${cloudBaseUrl()}/rest/v1/mit_heartbeats?workspace_id=eq.${id}&select=agent_id,asset_tag,hostname,mac_address,last_seen,meta&order=last_seen.desc`,
+        { headers }
+      ),
+      cloudFetch(
+        `${cloudBaseUrl()}/rest/v1/mit_agents?workspace_id=eq.${id}&select=agent_id,asset_tag,hostname,serial_number,mac_address,last_seen,status,token_revoked&order=last_seen.desc.nullslast`,
+        { headers }
+      ),
+    ]);
+
+    if (!hbRes.ok) {
+      const errText = await hbRes.text();
+      throw new Error(errText || `HTTP ${hbRes.status}`);
     }
-    const rows = await res.json();
+    const rows = await hbRes.json();
+    let agentRows = [];
+    if (agRes.ok) {
+      const agents = await agRes.json();
+      agentRows = (Array.isArray(agents) ? agents : [])
+        .filter((a) => a.status !== 'disabled' && !a.token_revoked && a.last_seen)
+        .map((a) => ({
+          agent_id: a.agent_id,
+          asset_tag: a.asset_tag,
+          hostname: a.hostname,
+          serial_number: a.serial_number,
+          mac_address: a.mac_address,
+          last_seen: a.last_seen,
+        }));
+    }
+
     const { applyHeartbeatsToAssets, reconcilePresence } = await import('./presence.js');
-    const { updated } = applyHeartbeatsToAssets(rows, { save: true });
+    const merged = [...rows, ...agentRows];
+    const { updated } = applyHeartbeatsToAssets(merged, { save: true });
     reconcilePresence({ save: true, silent: true });
-    if (!silent) toast(updated ? `Presence updated (${updated} device(s))` : 'No new heartbeats');
+    if (!silent) {
+      toast(updated
+        ? `Presence updated (${updated} device(s))`
+        : (merged.length
+          ? 'Heartbeats found but no matching assets — set asset Tag/Serial/MAC to match the agent'
+          : 'No heartbeats yet'));
+    }
     return rows;
   } catch (err) {
     if (!silent) toast('Could not load heartbeats — check SQL setup / RLS');

@@ -5,7 +5,7 @@ import {
 } from './utils.js';
 import {
   state, saveState, applyState, defaultState, STORAGE_KEY,
-  staffName, userName, partyName, ensureUsersArray, findOrCreateDeviceUser,
+  staffName, userName, partyName, ensureUsersArray,
   findUserByNameOrEmail, findStaffByNameOrEmail, generateAssetTag, bumpTagCounter, parseTagNumber,
   syncTagNextNumberFromAssets, logAutomation, logAssignment, notifyUser,
   unreadCount, getSessionUserId, setSession, clearSession, getCurrentUser,
@@ -289,6 +289,15 @@ function advanceTaskStatus(taskId, newStatus, resolutionData) {
   }
 
   const prev = task.status;
+  const prevStarted = task.startedAt;
+  const prevResolved = task.resolvedAt;
+  const prevClosed = task.closedAt;
+  const prevOverdue = task.overdue;
+  const prevTtrMs = task.timeToResolveMs;
+  const prevTtrLabel = task.timeToResolveLabel;
+  const prevDocId = task.resolutionDocId;
+  const prevNotes = task.resolutionNotes;
+
   task.status = newStatus;
   if (newStatus === 'in-progress') task.startedAt = task.startedAt || new Date().toISOString();
   if (newStatus === 'resolved') {
@@ -302,7 +311,30 @@ function advanceTaskStatus(taskId, newStatus, resolutionData) {
   }
 
   logAutomation('Status Change', `${task.title}: ${prev} → ${newStatus}`);
-  saveState();
+  const saved = saveState();
+  if (!saved) {
+    // Revert so reload doesn't look "fixed" while disk still has the old status
+    task.status = prev;
+    task.startedAt = prevStarted;
+    task.resolvedAt = prevResolved;
+    task.closedAt = prevClosed;
+    task.overdue = prevOverdue;
+    task.timeToResolveMs = prevTtrMs;
+    task.timeToResolveLabel = prevTtrLabel;
+    task.resolutionDocId = prevDocId;
+    task.resolutionNotes = prevNotes;
+    if (Array.isArray(state.automationLog) && state.automationLog.length) {
+      state.automationLog.shift();
+    }
+    toast('Could not save — storage full. Task status was not changed.');
+    renderAll();
+    return false;
+  }
+
+  if (['resolved', 'closed'].includes(newStatus)) {
+    callHook('flushCloudPush');
+    callHook('flushFirebasePush');
+  }
   renderAll();
   toast(newStatus === 'resolved' ? 'Task resolved & documented' : `Task marked ${newStatus}`);
   return true;
@@ -356,7 +388,15 @@ window.resolveTask = function (id) {
 
 window.closeTask = function (id) {
   const task = state.tasks.find((t) => t.id === id);
-  if (!task || task.status !== 'resolved') return;
+  if (!task) return;
+  if (task.status === 'closed') {
+    toast('Task is already closed');
+    return;
+  }
+  if (task.status !== 'resolved') {
+    toast('Resolve the task first, then Close');
+    return;
+  }
   advanceTaskStatus(id, 'closed');
 };
 
@@ -528,15 +568,19 @@ function renderDashboard() {
   const presence = presenceStats();
   const onlineEl = document.getElementById('statOnline');
   const offlineEl = document.getElementById('statOffline');
-  if (onlineEl) onlineEl.textContent = isPresenceEnabled() ? presence.online : '—';
-  if (offlineEl) offlineEl.textContent = isPresenceEnabled() ? presence.offline : '—';
+  // Show counts whenever we have monitored devices; "—" only if presence off AND nothing reporting.
+  const showPresenceNums = isPresenceEnabled() || presence.monitored > 0;
+  if (onlineEl) onlineEl.textContent = showPresenceNums ? presence.online : '—';
+  if (offlineEl) offlineEl.textContent = showPresenceNums ? presence.offline : '—';
 
   const staleEl = document.getElementById('dashPresenceStale');
   if (staleEl) {
-    if (!isPresenceEnabled()) {
-      staleEl.innerHTML = '<div class="empty-state">Presence monitoring off — enable in Settings</div>';
-    } else if (!presence.stale.length) {
+    if (!isPresenceEnabled() && presence.monitored === 0) {
+      staleEl.innerHTML = '<div class="empty-state">Presence monitoring off — enable in Settings, then click Pull heartbeats</div>';
+    } else if (!presence.stale.length && presence.online > 0) {
       staleEl.innerHTML = '<div class="empty-state">All monitored devices online</div>';
+    } else if (!presence.monitored) {
+      staleEl.innerHTML = '<div class="empty-state">No devices reporting yet — install agent or match Tag/Serial/MAC on the asset</div>';
     } else {
       staleEl.innerHTML = presence.stale.slice(0, 8).map((a) =>
         `<div class="list-item"><span>${esc(a.tag)} — ${esc(a.name)}</span><span class="meta">${esc(formatLastSeen(a.lastSeenAt))}</span></div>`
@@ -1063,26 +1107,102 @@ function mapAssetImportRow(row) {
   );
   const itOwnerRaw = cellFromRow(row, 'IT Owner', 'Custodian', 'Technician', 'IT Staff', 'Support Owner');
   const legacyAssigned = cellFromRow(row, 'Assigned To', 'Assignee', 'Owner', 'User');
-  const usedBy = usedByRaw
-    ? findOrCreateDeviceUser(usedByRaw)
-    : (legacyAssigned && !findStaffByNameOrEmail(legacyAssigned) ? findOrCreateDeviceUser(legacyAssigned) : '');
+  // Link only — do not create device users during asset upload (add users in Storage after).
+  const usedByName = usedByRaw
+    || (legacyAssigned && !findStaffByNameOrEmail(legacyAssigned) ? legacyAssigned : '');
+  const usedBy = usedByName ? findUserByNameOrEmail(usedByName) : '';
   const assignee = findStaffByNameOrEmail(itOwnerRaw)
     || findStaffByNameOrEmail(legacyAssigned)
     || '';
 
+  const serial = cellFromRow(row, 'Serial', 'Serial Number', 'S/N', 'SN', 'Serial No', 'Service Tag');
+  const type = ASSET_TYPE_ALIASES[typeKey] || ASSET_TYPE_ALIASES[normalizeHeader(rawType)] || 'other';
+  const cleanTag = String(tag || '').trim();
+
   return {
-    tag: tag || generateAssetTag(ASSET_TYPE_ALIASES[typeKey] || 'other'),
-    name: name || tag || 'Imported Asset',
-    type: ASSET_TYPE_ALIASES[typeKey] || ASSET_TYPE_ALIASES[normalizeHeader(rawType)] || 'other',
+    tag: cleanTag, // may be empty — import resolves via serial / generates once
+    name: name || cleanTag || 'Imported Asset',
+    type,
     status: ASSET_STATUS_ALIASES[statusKey] || 'available',
-    serial: cellFromRow(row, 'Serial', 'Serial Number', 'S/N', 'SN', 'Serial No', 'Service Tag'),
+    serial,
     subsidiary: cellFromRow(row, 'Subsidiary', 'Company', 'Entity', 'Business Unit', 'BU', 'Org', 'Organization', 'Branch'),
     location: cellFromRow(row, 'Location', 'Site', 'Office', 'Floor', 'Building', 'Room'),
     usedBy,
+    usedByName: usedByName && !usedBy ? String(usedByName).trim() : '',
     assignee,
     nextMaintenance: excelDateToISO(cellFromRow(row, 'Next Maintenance', 'Maintenance Date', 'Next Service', 'PM Date')),
     notes: cellFromRow(row, 'Notes', 'Comment', 'Comments', 'Remark', 'Remarks'),
   };
+}
+
+function normalizeImportTag(tag) {
+  return String(tag || '').trim().replace(/\s+/g, ' ');
+}
+
+function normalizeImportSerial(serial) {
+  return String(serial || '').trim().toLowerCase();
+}
+
+/** Match existing asset by tag (preferred) or serial to avoid duplicates on re-upload. */
+function findExistingAssetForImport(mapped) {
+  const tag = normalizeImportTag(mapped.tag).toLowerCase();
+  const serial = normalizeImportSerial(mapped.serial);
+  if (tag) {
+    const byTag = state.assets.find((a) => normalizeImportTag(a.tag).toLowerCase() === tag);
+    if (byTag) return byTag;
+  }
+  if (serial) {
+    const bySerial = state.assets.find((a) => normalizeImportSerial(a.serial) === serial);
+    if (bySerial) return bySerial;
+  }
+  return null;
+}
+
+/** Collapse exact tag / serial duplicates already in inventory (keep richest row). */
+function mergeDuplicateAssetsInState() {
+  const keep = new Map(); // key -> asset
+  const removeIds = new Set();
+
+  const score = (a) =>
+    [a.name, a.serial, a.location, a.subsidiary, a.usedBy, a.assignee, a.notes, a.macAddress]
+      .filter(Boolean).length + (a.lastSeenAt ? 2 : 0);
+
+  state.assets.forEach((a) => {
+    const tagKey = normalizeImportTag(a.tag).toLowerCase();
+    const serialKey = normalizeImportSerial(a.serial);
+    const keys = [];
+    if (tagKey) keys.push(`tag:${tagKey}`);
+    if (serialKey) keys.push(`serial:${serialKey}`);
+    if (!keys.length) return;
+
+    let existing = null;
+    for (const k of keys) {
+      if (keep.has(k)) { existing = keep.get(k); break; }
+    }
+    if (!existing) {
+      keys.forEach((k) => keep.set(k, a));
+      return;
+    }
+    if (existing.id === a.id) {
+      keys.forEach((k) => keep.set(k, existing));
+      return;
+    }
+    const winner = score(a) > score(existing) ? a : existing;
+    const loser = winner === a ? existing : a;
+    // Merge sparse fields onto winner
+    ['name', 'type', 'status', 'serial', 'subsidiary', 'location', 'usedBy', 'assignee', 'nextMaintenance', 'notes', 'macAddress', 'agentId', 'lastSeenAt']
+      .forEach((f) => { if (!winner[f] && loser[f]) winner[f] = loser[f]; });
+    removeIds.add(loser.id);
+    keys.forEach((k) => keep.set(k, winner));
+    // Re-point any keys that still pointed at loser
+    for (const [k, v] of keep.entries()) {
+      if (v.id === loser.id) keep.set(k, winner);
+    }
+  });
+
+  if (!removeIds.size) return 0;
+  state.assets = state.assets.filter((a) => !removeIds.has(a.id));
+  return removeIds.size;
 }
 
 function downloadAssetWorkbook(rows, filename) {
@@ -1154,9 +1274,14 @@ async function importAssetsFromFile(file) {
   let skipped = 0;
   let skippedEmpty = 0;
   let skippedScope = 0;
+  const unmatchedUsers = [];
+  const seenInFile = new Map(); // tag|serial -> asset id already touched this import
   const scopeSubs = !isAdmin()
     ? staffSubsidiaries(getCurrentUser()).map(normalizeSubsidiary)
     : [];
+
+  // Collapse any tag/serial duplicates already in the inventory first
+  const mergedDupes = mergeDuplicateAssetsInState();
 
   rows.forEach((row) => {
     const blank = Object.values(row).every((v) => v == null || String(v).trim() === '');
@@ -1177,9 +1302,20 @@ async function importAssetsFromFile(file) {
       }
     }
 
-    const existing = state.assets.find(
-      (a) => (a.tag || '').toLowerCase() === mapped.tag.toLowerCase()
-    );
+    if (mapped.usedByName) unmatchedUsers.push(mapped.usedByName);
+    const usedByName = mapped.usedByName;
+    delete mapped.usedByName;
+
+    const tagNorm = normalizeImportTag(mapped.tag).toLowerCase();
+    const serialNorm = normalizeImportSerial(mapped.serial);
+    const fileKey = tagNorm ? `tag:${tagNorm}` : (serialNorm ? `serial:${serialNorm}` : '');
+
+    let existing = null;
+    if (fileKey && seenInFile.has(fileKey)) {
+      existing = state.assets.find((a) => a.id === seenInFile.get(fileKey)) || null;
+    }
+    if (!existing) existing = findExistingAssetForImport(mapped);
+
     if (existing) {
       Object.assign(existing, {
         name: mapped.name || existing.name,
@@ -1193,15 +1329,27 @@ async function importAssetsFromFile(file) {
         nextMaintenance: mapped.nextMaintenance || existing.nextMaintenance,
         notes: mapped.notes || existing.notes,
       });
+      if (mapped.tag) existing.tag = normalizeImportTag(mapped.tag);
       updated++;
+      if (fileKey) seenInFile.set(fileKey, existing.id);
+      if (serialNorm) seenInFile.set(`serial:${serialNorm}`, existing.id);
     } else {
+      if (!mapped.tag) {
+        mapped.tag = generateAssetTag(mapped.type || 'other');
+      } else {
+        mapped.tag = normalizeImportTag(mapped.tag);
+      }
+      const id = uid();
       state.assets.push({
-        id: uid(),
+        id,
         ...mapped,
         created: new Date().toISOString(),
       });
       bumpTagCounter(mapped.tag);
       added++;
+      if (fileKey) seenInFile.set(fileKey, id);
+      else seenInFile.set(`tag:${normalizeImportTag(mapped.tag).toLowerCase()}`, id);
+      if (serialNorm) seenInFile.set(`serial:${serialNorm}`, id);
     }
   });
 
@@ -1209,9 +1357,14 @@ async function importAssetsFromFile(file) {
   renderAll();
   const summary = document.getElementById('assetImportSummary');
   const parts = [`Import: ${added} added, ${updated} updated`];
+  if (mergedDupes) parts.push(`${mergedDupes} duplicate(s) merged`);
   if (skipped) parts.push(`${skipped} skipped (no Tag/Name)`);
   if (skippedScope) parts.push(`${skippedScope} out of subsidiary scope`);
   if (skippedEmpty) parts.push(`${skippedEmpty} blank`);
+  if (unmatchedUsers.length) {
+    const uniq = [...new Set(unmatchedUsers)].slice(0, 5);
+    parts.push(`${unmatchedUsers.length} Used By not linked (add users in Storage first: ${uniq.join(', ')}${unmatchedUsers.length > 5 ? '…' : ''})`);
+  }
   if (!saved) parts.push('save failed — storage full');
   const headerNote = detectedHeaders.length
     ? ` · columns: ${detectedHeaders.slice(0, 8).join(' | ')}${detectedHeaders.length > 8 ? '…' : ''}`
@@ -1223,7 +1376,7 @@ async function importAssetsFromFile(file) {
     console.warn('Asset import skipped all rows. Columns:', detectedHeaders, 'sample:', rows[0]);
     toast(`No assets imported. Columns seen: ${detectedHeaders.join(', ') || '(none)'}. Use Download Template headers.`);
   } else {
-    toast(`Assets imported — ${added} added, ${updated} updated`);
+    toast(`Assets imported — ${added} added, ${updated} updated${mergedDupes ? `, ${mergedDupes} dupes merged` : ''}`);
   }
 }
 
@@ -2480,6 +2633,7 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
   const data = Object.fromEntries(fd.entries());
+  let flushTaskStatus = false;
 
   if (modalMode === 'asset') {
     const mySubs = staffSubsidiaries(getCurrentUser());
@@ -2613,6 +2767,9 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
         const doc = state.documentation.find((d) => d.id === t.resolutionDocId);
         if (doc) doc.attachments = [...ensureTaskAttachments(t)];
       }
+      if (['resolved', 'closed'].includes(t.status) && !['resolved', 'closed'].includes(prevStatus)) {
+        flushTaskStatus = true;
+      }
     } else {
       const newTask = { id: uid(), ...data, created: new Date().toISOString(), attachments: [] };
       commitModalAttachments(newTask);
@@ -2656,14 +2813,23 @@ document.getElementById('modalForm').addEventListener('submit', (e) => {
     saveResolutionDoc(task, { ...data, attachments: task.attachments });
     logAutomation('Status Change', `${task.title}: ${prev} → resolved (${task.timeToResolveLabel})`);
     document.getElementById('modal').close();
-    saveState();
+    if (!saveState()) {
+      toast('Could not save — storage full. Resolve may not persist after reload.');
+    } else {
+      callHook('flushCloudPush');
+      callHook('flushFirebasePush');
+      toast(`Resolved in ${task.timeToResolveLabel}`);
+    }
     renderAll();
-    toast(`Resolved in ${task.timeToResolveLabel}`);
     return;
   }
 
   saveState();
   document.getElementById('modal').close();
+  if (flushTaskStatus) {
+    callHook('flushCloudPush');
+    callHook('flushFirebasePush');
+  }
   renderAll();
   toast('Saved successfully');
 });
@@ -2724,12 +2890,10 @@ function renderMyWork() {
 
   greeting.textContent = `Welcome, ${user.name}. Below is everything assigned to you.`;
 
-  const tasks = state.tasks.filter((t) => t.assignee === user.id && t.status !== 'closed');
+  const tasks = state.tasks.filter((t) => t.assignee === user.id && !['resolved', 'closed'].includes(t.status));
   myTasks.innerHTML = tasks.length
     ? tasks.map((t) => {
-      const age = ['resolved', 'closed'].includes(t.status)
-        ? timeToResolveLabel(t)
-        : formatDuration(Date.now() - new Date(taskStartTime(t) || Date.now()).getTime());
+      const age = formatDuration(Date.now() - new Date(taskStartTime(t) || Date.now()).getTime());
       return `
       <tr>
         <td>${taskTitleWithHover(t)}</td>
@@ -2740,7 +2904,7 @@ function renderMyWork() {
         <td>${workflowButtons(t)}</td>
       </tr>`;
     }).join('')
-    : '<tr><td colspan="6" class="empty-state">No tasks assigned to you</td></tr>';
+    : '<tr><td colspan="6" class="empty-state">No open tasks assigned to you</td></tr>';
 
   const assets = state.assets.filter((a) => a.assignee === user.id);
   myAssets.innerHTML = assets.length
