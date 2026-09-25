@@ -906,6 +906,11 @@ textarea {
   gap: 0.5rem;
 }
 
+#myAssetsList {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
 .list-item {
   display: flex;
   justify-content: space-between;
