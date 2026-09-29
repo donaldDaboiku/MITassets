@@ -1,26 +1,24 @@
-# Device Allocation Edge Function
+# Device allocation Edge Function
 
-Public onboarding endpoint for `allocate.html`. Uses the **service role**
-server-side so the public page never needs the anon key.
+Public onboarding endpoint for `allocate.html` and receipt confirmation for `allocate-receipt.html`.
+Uses the **service role**. The public pages never hold API keys.
 
 ## Deploy
 
-1. Re-run the `mit_allocation_requests` section of `supabase-setup.sql` in the SQL Editor.
-2. Deploy with JWT verification **off** (public form has no user session):
+1. Re-run the `mit_allocation_requests` section of `supabase-setup.sql` (adds `preferred_type`, `receipt_*` columns).
+2. Deploy:
 
 ```bash
 supabase functions deploy device-allocation --no-verify-jwt
 ```
 
-`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are usually injected automatically on hosted Supabase.
-
 ## API
 
 **GET** `/functions/v1/device-allocation?workspace_id=main`
 
-Returns only available devices: `{ id, tag, name, type }`.
+Health check only: `{ ok: true, workspace_id }`. Does **not** return inventory.
 
-**POST** `/functions/v1/device-allocation`
+**POST** create request
 
 ```json
 {
@@ -30,11 +28,24 @@ Returns only available devices: `{ id, tag, name, type }`.
   "department": "Finance",
   "subsidiary": "MIT HQ",
   "jobRole": "Analyst",
-  "notes": "",
-  "signatureName": "Jane Doe",
-  "confirmedReceipt": true,
-  "deviceIds": ["asset-id-1", "asset-id-2"]
+  "preferredType": "laptop",
+  "notes": "Needs docking station",
+  "signatureName": "Jane Doe"
 }
 ```
 
-Inserts a `pending` row into `mit_allocation_requests`. Never writes `mit_workspace` — IT approves inside the signed-in app (Allocations view).
+Inserts a `pending` row with empty `device_ids`. IT assigns devices in the signed-in app.
+
+**POST** receipt lookup / confirm
+
+```json
+{ "action": "receipt_lookup", "workspaceId": "main", "token": "…" }
+{ "action": "confirm_receipt", "workspaceId": "main", "token": "…", "condition": "good"|"bad", "signatureName": "…", "receiptNote": "…" }
+```
+
+## App flow
+
+1. Share Allocations → onboarding link (`allocate.html`).
+2. Requester submits (no device list).
+3. IT opens Allocations → **Assign device** → pick available stock → optional EmailJS receipt link.
+4. Recipient opens `allocate-receipt.html` and confirms **good** or **bad**.

@@ -1,12 +1,12 @@
 /**
  * Device allocation review — pending requests from public allocate.html.
- * Approvals update local assets + assignment history; request rows live in Supabase.
+ * Public form does not list inventory; IT assigns available devices here,
+ * then emails a receipt confirmation link (good / bad).
  */
 import { esc, toast, badge, uid } from './utils.js';
 import {
   state,
   saveState,
-  isAdmin,
   getCurrentUser,
   ensureUsersArray,
   findUserByNameOrEmail,
@@ -34,6 +34,15 @@ export function buildOnboardingLink() {
   return `${base}?supabaseUrl=${u}&workspace=${w}`;
 }
 
+export function buildReceiptLink(token) {
+  if (!cloudConfigured() || !token) return '';
+  const path = location.pathname.replace(/\/[^/]*$/, '/') + 'allocate-receipt.html';
+  const base = `${location.origin}${path}`;
+  const u = encodeURIComponent(cloudBaseUrl());
+  const w = encodeURIComponent(cloudWorkspaceId());
+  return `${base}?supabaseUrl=${u}&workspace=${w}&token=${encodeURIComponent(token)}`;
+}
+
 function typeLabel(type) {
   const t = String(type || 'other');
   return t.charAt(0).toUpperCase() + t.slice(1);
@@ -42,10 +51,18 @@ function typeLabel(type) {
 function devicesLabel(row) {
   const list = Array.isArray(row.devices) ? row.devices : [];
   if (!list.length) {
-    const ids = Array.isArray(row.device_ids) ? row.device_ids : [];
-    return ids.length ? `${ids.length} device(s)` : '—';
+    const pref = row.preferred_type ? `Prefers ${typeLabel(row.preferred_type)}` : 'Awaiting IT assignment';
+    return pref;
   }
   return list.map((d) => `${d.tag || '?'} (${typeLabel(d.type)})`).join(', ');
+}
+
+function availableAssetsForAssign(preferredType) {
+  const pref = String(preferredType || '').toLowerCase();
+  const list = (state.assets || []).filter((a) => String(a.status || '').toLowerCase() === 'available');
+  if (!pref) return list;
+  const matched = list.filter((a) => String(a.type || '').toLowerCase() === pref);
+  return matched.length ? matched : list;
 }
 
 function ensureDeviceUserFromRequest(row) {
@@ -120,7 +137,6 @@ async function updateRequestRow(id, patch) {
 function syncAllocationBadge() {
   const badgeEl = document.getElementById('allocationsBadge');
   if (!badgeEl) return;
-  // When showing all statuses, recount pending from cache; when filtered, cache is pending-only.
   const n = showAllStatuses
     ? cachedRequests.filter((r) => r.status === 'pending').length
     : cachedRequests.length;
@@ -139,14 +155,19 @@ function renderOnboardingLinkPanel() {
   if (input) input.value = link;
   if (hint) {
     hint.textContent = link
-      ? 'Share this link with HR or new hires. It does not include your anon key.'
+      ? 'Share this link with HR or new hires. They request a device — IT assigns stock here. No anon key in the link.'
       : 'Configure Supabase cloud sync in Settings first — the link uses your project URL + workspace id only.';
   }
 }
 
-function statusBadge(status) {
+function statusBadge(status, receiptStatus) {
   const s = String(status || 'pending');
-  if (s === 'approved') return badge('active', 'approved');
+  if (s === 'approved') {
+    if (receiptStatus === 'good') return badge('active', 'receipt: good');
+    if (receiptStatus === 'bad') return badge('lost', 'receipt: bad');
+    if (receiptStatus === 'pending') return badge('maintenance', 'awaiting receipt');
+    return badge('active', 'approved');
+  }
   if (s === 'rejected') return badge('retired', 'rejected');
   return badge('maintenance', 'pending');
 }
@@ -167,16 +188,21 @@ function renderAllocationTable() {
   tbody.innerHTML = cachedRequests.map((r) => {
     const when = r.created_at ? new Date(r.created_at).toLocaleString() : '—';
     const actions = r.status === 'pending'
-      ? `<button type="button" class="btn btn-sm btn-primary" data-approve-alloc="${esc(r.id)}">Approve</button>
+      ? `<button type="button" class="btn btn-sm btn-primary" data-approve-alloc="${esc(r.id)}">Assign device</button>
          <button type="button" class="btn btn-sm btn-secondary" data-reject-alloc="${esc(r.id)}">Reject</button>`
-      : `<span class="hint">${esc(r.processed_by || '')}${r.reject_reason ? ` · ${esc(r.reject_reason)}` : ''}</span>`;
+      : (r.status === 'approved' && r.receipt_status === 'pending' && r.receipt_token
+        ? `<button type="button" class="btn btn-sm btn-ghost" data-resend-receipt="${esc(r.id)}">Resend receipt email</button>
+           <span class="hint">${esc(r.processed_by || '')}</span>`
+        : `<span class="hint">${esc(r.processed_by || '')}${r.reject_reason ? ` · ${esc(r.reject_reason)}` : ''}${
+            r.receipt_status === 'bad' && r.receipt_note ? ` · ${esc(r.receipt_note)}` : ''
+          }</span>`);
     return `<tr>
       <td>${esc(when)}</td>
       <td><strong>${esc(r.full_name)}</strong><div class="meta">${esc(r.email || '')}</div></td>
       <td>${esc(r.department || '—')}<div class="meta">${esc(r.subsidiary || '')}</div></td>
-      <td>${esc(r.job_role || '—')}</td>
+      <td>${esc(r.job_role || '—')}${r.preferred_type ? `<div class="meta">Pref: ${esc(typeLabel(r.preferred_type))}</div>` : ''}</td>
       <td>${esc(devicesLabel(r))}</td>
-      <td>${statusBadge(r.status)}</td>
+      <td>${statusBadge(r.status, r.receipt_status)}</td>
       <td class="table-actions">${actions}</td>
     </tr>`;
   }).join('');
@@ -197,19 +223,96 @@ export async function renderAllocations() {
   syncAllocationBadge();
 }
 
-async function approveRequest(id) {
-  if (!isAdmin()) {
-    toast('Only administrators can approve allocations');
+function openAssignModal(id) {
+  if (!getCurrentUser()) {
+    toast('Sign in to assign devices');
     return;
   }
   const row = cachedRequests.find((r) => r.id === id);
   if (!row || row.status !== 'pending') return;
-  if (!confirm(`Approve devices for ${row.full_name}?`)) return;
+
+  const available = availableAssetsForAssign(row.preferred_type);
+  if (!available.length) {
+    toast('No available devices in inventory — mark stock as Available first');
+    return;
+  }
+
+  const options = available.map((a) => `
+    <label class="toggle-item" style="flex-direction:row;align-items:flex-start;gap:0.6rem;justify-content:flex-start">
+      <input type="checkbox" name="deviceIds" value="${esc(a.id)}" />
+      <span><strong>${esc(a.tag)}</strong> — ${esc(a.name)}
+        <span class="meta">${esc(typeLabel(a.type))}${a.serial ? ` · ${esc(a.serial)}` : ''}</span>
+      </span>
+    </label>
+  `).join('');
+
+  callHook(
+    'openModal',
+    `Assign device — ${row.full_name}`,
+    'allocation-approve',
+    id,
+    `
+      <p class="hint">Select one or more <strong>available</strong> devices for ${esc(row.full_name)} (${esc(row.email)}).
+      ${row.preferred_type ? ` Preferred: <strong>${esc(typeLabel(row.preferred_type))}</strong>.` : ''}
+      After assign, an email asks them to confirm receipt (good / bad).</p>
+      ${row.notes ? `<p class="hint">Notes: ${esc(row.notes)}</p>` : ''}
+      <div style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:0.35rem;margin:0.75rem 0">
+        ${options}
+      </div>
+      <label class="toggle-item" style="flex-direction:row;justify-content:space-between">
+        Email receipt confirmation link
+        <input type="checkbox" name="sendReceiptEmail" checked />
+      </label>
+    `
+  );
+}
+
+async function sendReceiptEmail(row, token, devices) {
+  const link = buildReceiptLink(token);
+  const deviceText = (devices || [])
+    .map((d) => `${d.tag || '?'} — ${d.name || ''}`)
+    .join(', ') || 'assigned device';
+  const message =
+    `Hello ${row.full_name},\n\n` +
+    `IT has assigned: ${deviceText}.\n\n` +
+    `Please confirm receipt and condition (good or bad) using this link:\n${link}\n\n` +
+    `— ${state.settings?.appName || 'MIT Asset'} IT`;
+
+  await callHook(
+    'sendEmailToAddress',
+    row.email,
+    row.full_name,
+    'Device receipt confirmation',
+    deviceText,
+    message
+  );
+}
+
+async function submitAllocationApprove(data, requestId) {
+  const row = cachedRequests.find((r) => r.id === requestId);
+  if (!row || row.status !== 'pending') {
+    toast('Request not found or already processed');
+    return false;
+  }
+
+  // FormData checkboxes: Object.fromEntries keeps only last; read from form instead
+  const form = document.getElementById('modalForm');
+  const deviceIds = form
+    ? [...form.querySelectorAll('input[name="deviceIds"]:checked')].map((el) => el.value)
+    : [];
+  const sendEmail = form
+    ? !!form.querySelector('input[name="sendReceiptEmail"]')?.checked
+    : true;
+
+  if (!deviceIds.length) {
+    toast('Select at least one available device');
+    return false;
+  }
 
   const userId = ensureDeviceUserFromRequest(row);
-  const deviceIds = Array.isArray(row.device_ids) ? row.device_ids : [];
   const skipped = [];
   const assigned = [];
+  const deviceSnapshots = [];
 
   deviceIds.forEach((assetId) => {
     const asset = state.assets.find((a) => a.id === assetId);
@@ -234,47 +337,87 @@ async function approveRequest(id) {
       `Onboarding: ${row.full_name}${row.job_role ? ` · ${row.job_role}` : ''}`
     );
     assigned.push(asset.tag || asset.id);
+    deviceSnapshots.push({
+      id: asset.id,
+      tag: asset.tag,
+      name: asset.name,
+      type: asset.type,
+    });
   });
 
   if (!assigned.length) {
     toast(skipped.length
       ? `No devices assigned — all unavailable: ${skipped.join(', ')}`
       : 'No devices to assign');
-    return;
+    return false;
   }
 
   saveState();
-  const processor = getCurrentUser()?.name || 'admin';
+  const processor = getCurrentUser()?.name || 'IT';
+  const receiptToken = uid() + uid();
+
   try {
-    await updateRequestRow(id, {
+    await updateRequestRow(requestId, {
       status: 'approved',
       processed_at: new Date().toISOString(),
       processed_by: processor,
+      device_ids: deviceIds,
+      devices: deviceSnapshots,
+      confirmed_receipt: false,
+      receipt_token: receiptToken,
+      receipt_status: 'pending',
+      receipt_note: null,
+      receipt_confirmed_at: null,
       reject_reason: skipped.length ? `Skipped: ${skipped.join('; ')}` : null,
     });
   } catch (err) {
-    toast(`Devices assigned locally, but cloud status update failed: ${err.message || err}`);
+    toast(`Devices assigned locally, but cloud update failed: ${err.message || err}`);
     callHook('renderAll');
-    return;
+    return false;
+  }
+
+  if (sendEmail) {
+    try {
+      await sendReceiptEmail(row, receiptToken, deviceSnapshots);
+    } catch (err) {
+      toast(`Assigned, but email failed: ${err.message || err}. Use Resend receipt email.`);
+      await renderAllocations();
+      return true;
+    }
   }
 
   toast(skipped.length
-    ? `Approved ${assigned.length}; skipped: ${skipped.join(', ')}`
-    : `Approved — ${assigned.length} device(s) assigned`);
+    ? `Assigned ${assigned.length}; skipped: ${skipped.join(', ')}`
+    : `Assigned ${assigned.length} device(s)${sendEmail ? ' · receipt email sent' : ''}`);
   callHook('renderAll');
   await renderAllocations();
+  return true;
+}
+
+async function resendReceiptEmail(id) {
+  const row = cachedRequests.find((r) => r.id === id);
+  if (!row?.receipt_token) {
+    toast('No receipt token on this request');
+    return;
+  }
+  try {
+    await sendReceiptEmail(row, row.receipt_token, row.devices || []);
+    toast('Receipt confirmation email sent');
+  } catch (err) {
+    toast(err.message || 'Email failed — check EmailJS in Settings');
+  }
 }
 
 async function rejectRequest(id) {
-  if (!isAdmin()) {
-    toast('Only administrators can reject allocations');
+  if (!getCurrentUser()) {
+    toast('Sign in to reject requests');
     return;
   }
   const row = cachedRequests.find((r) => r.id === id);
   if (!row || row.status !== 'pending') return;
   const reason = prompt(`Reject request from ${row.full_name}?\nOptional reason:`, '') ?? null;
   if (reason === null) return;
-  const processor = getCurrentUser()?.name || 'admin';
+  const processor = getCurrentUser()?.name || 'IT';
   try {
     await updateRequestRow(id, {
       status: 'rejected',
@@ -322,12 +465,13 @@ function wireAllocationUi() {
   document.getElementById('allocationsTable')?.addEventListener('click', (e) => {
     const approveId = e.target.closest('[data-approve-alloc]')?.getAttribute('data-approve-alloc');
     const rejectId = e.target.closest('[data-reject-alloc]')?.getAttribute('data-reject-alloc');
-    if (approveId) approveRequest(approveId);
+    const resendId = e.target.closest('[data-resend-receipt]')?.getAttribute('data-resend-receipt');
+    if (approveId) openAssignModal(approveId);
     if (rejectId) rejectRequest(rejectId);
+    if (resendId) resendReceiptEmail(resendId);
   });
 }
 
-/** Silent refresh for nav badge (pending only). */
 export async function refreshAllocationBadge() {
   if (!cloudConfigured()) {
     cachedRequests = [];
@@ -348,10 +492,10 @@ export async function refreshAllocationBadge() {
 export function registerAllocations() {
   setHook('renderAllocations', renderAllocations);
   setHook('refreshAllocationBadge', refreshAllocationBadge);
+  setHook('submitAllocationApprove', submitAllocationApprove);
   wireAllocationUi();
 }
 
-/** Smallest check: onboarding link omits anon key. */
 export function runAllocationSelfCheck() {
   const fake = 'https://example.supabase.co';
   const link = `https://app.example/allocate.html?supabaseUrl=${encodeURIComponent(fake)}&workspace=main`;

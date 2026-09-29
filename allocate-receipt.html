@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Confirm device receipt — MIT Asset</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .alloc-page {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 3rem;
+    }
+    .alloc-page .brand { margin-bottom: 1.25rem; }
+    .alloc-status { margin: 0.75rem 0; }
+    .alloc-status.error { color: var(--danger); }
+    .alloc-status.ok { color: var(--success); }
+    .condition-options {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin: 0.5rem 0 1rem;
+    }
+    .condition-options label {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.6rem;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface2);
+      cursor: pointer;
+    }
+    .condition-options label:hover { border-color: var(--primary); }
+    .sig-hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+    .sig-hint.bad { color: var(--danger); }
+    .sig-hint.good { color: var(--success); }
+    .device-card {
+      padding: 0.85rem 1rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="alloc-page">
+    <div class="brand">
+      <span class="brand-icon">⚙</span>
+      <div>
+        <strong>MIT Asset</strong>
+        <small>Confirm device receipt</small>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Confirm receipt</h2>
+      <p class="hint" id="allocConfigHint">Loading…</p>
+      <div class="device-card" id="deviceCard" hidden></div>
+      <p class="alloc-status" id="allocStatus" hidden></p>
+
+      <form id="receiptForm" class="form" hidden>
+        <p class="hint">Confirm the condition of the device you received.</p>
+        <div class="condition-options">
+          <label>
+            <input type="radio" name="condition" value="good" required />
+            <span><strong>Good condition</strong><br><span class="hint">Device works and has no visible damage.</span></span>
+          </label>
+          <label>
+            <input type="radio" name="condition" value="bad" />
+            <span><strong>Bad / damaged / not working</strong><br><span class="hint">Describe the issue below.</span></span>
+          </label>
+        </div>
+        <label>Notes (required if bad)
+          <textarea name="receiptNote" rows="3" placeholder="Describe damage or fault…"></textarea>
+        </label>
+        <label>Type your full name as signature
+          <input type="text" name="signatureName" required autocomplete="off" />
+        </label>
+        <p class="sig-hint" id="sigHint">Signature must match the name on the request.</p>
+        <button type="submit" class="btn btn-primary btn-block" id="receiptSubmit">Submit confirmation</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script>
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const supabaseUrl = String(params.get('supabaseUrl') || params.get('u') || '')
+        .trim()
+        .replace(/\/$/, '');
+      const workspaceId = String(params.get('workspace') || params.get('w') || 'main').trim() || 'main';
+      const token = String(params.get('token') || params.get('t') || '').trim();
+
+      const hint = document.getElementById('allocConfigHint');
+      const statusEl = document.getElementById('allocStatus');
+      const form = document.getElementById('receiptForm');
+      const deviceCard = document.getElementById('deviceCard');
+      const sigHint = document.getElementById('sigHint');
+      const toastEl = document.getElementById('toast');
+      let expectedName = '';
+
+      function toast(msg) {
+        toastEl.textContent = msg;
+        toastEl.hidden = false;
+        clearTimeout(toastEl._t);
+        toastEl._t = setTimeout(() => { toastEl.hidden = true; }, 2800);
+      }
+
+      function setStatus(msg, isError) {
+        statusEl.hidden = !msg;
+        statusEl.textContent = msg || '';
+        statusEl.classList.toggle('error', !!isError);
+        statusEl.classList.toggle('ok', !!msg && !isError);
+      }
+
+      function escapeHtml(s) {
+        return String(s || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function normalizeName(v) {
+        return String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+      }
+
+      function namesMatch(a, b) {
+        const na = normalizeName(a);
+        const nb = normalizeName(b);
+        return na.length > 0 && na === nb;
+      }
+
+      function fnUrl() {
+        return `${supabaseUrl}/functions/v1/device-allocation?workspace_id=${encodeURIComponent(workspaceId)}`;
+      }
+
+      function updateSigHint() {
+        const sig = form.signatureName.value;
+        if (!sig.trim()) {
+          sigHint.textContent = 'Signature must match the name on the request.';
+          sigHint.className = 'sig-hint';
+          return;
+        }
+        if (namesMatch(expectedName, sig)) {
+          sigHint.textContent = 'Signature matches.';
+          sigHint.className = 'sig-hint good';
+        } else {
+          sigHint.textContent = 'Signature does not match.';
+          sigHint.className = 'sig-hint bad';
+        }
+      }
+
+      async function loadReceipt() {
+        if (!supabaseUrl || !/^https:\/\//i.test(supabaseUrl) || !token) {
+          hint.textContent = 'Invalid confirmation link. Ask IT to resend the receipt email.';
+          return;
+        }
+        try {
+          const res = await fetch(fnUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'receipt_lookup', workspaceId, token }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+          expectedName = data.fullName || '';
+          const devices = Array.isArray(data.devices) ? data.devices : [];
+          const deviceText = devices.length
+            ? devices.map((d) => `${d.tag || '?'} — ${d.name || ''}`).join(', ')
+            : 'Device assigned by IT';
+
+          if (data.receiptStatus === 'good' || data.receiptStatus === 'bad') {
+            hint.textContent = 'This receipt was already confirmed.';
+            setStatus(
+              data.receiptStatus === 'good'
+                ? 'Already confirmed: good condition.'
+                : 'Already confirmed: bad / damaged.',
+              false
+            );
+            return;
+          }
+
+          hint.textContent = `Confirm receipt for ${escapeHtml(expectedName)}`;
+          deviceCard.hidden = false;
+          deviceCard.innerHTML = `<strong>Assigned device(s)</strong><div class="meta">${escapeHtml(deviceText)}</div>`;
+          form.hidden = false;
+          updateSigHint();
+        } catch (err) {
+          hint.textContent = 'Could not load this confirmation link.';
+          setStatus(String(err.message || err), true);
+        }
+      }
+
+      form.signatureName.addEventListener('input', updateSigHint);
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        setStatus('');
+        const fd = new FormData(form);
+        const condition = String(fd.get('condition') || '');
+        const signatureName = String(fd.get('signatureName') || '').trim();
+        const receiptNote = String(fd.get('receiptNote') || '').trim();
+
+        if (!namesMatch(expectedName, signatureName)) {
+          setStatus('Signature must match your name on the request.', true);
+          updateSigHint();
+          return;
+        }
+        if (condition === 'bad' && !receiptNote) {
+          setStatus('Please describe the problem for a bad/damaged device.', true);
+          return;
+        }
+
+        const btn = document.getElementById('receiptSubmit');
+        btn.disabled = true;
+        try {
+          const res = await fetch(fnUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'confirm_receipt',
+              workspaceId,
+              token,
+              condition,
+              receiptNote,
+              signatureName,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+          form.hidden = true;
+          setStatus(
+            condition === 'good'
+              ? 'Thank you — receipt confirmed in good condition.'
+              : 'Thank you — IT has been notified of the issue.',
+            false
+          );
+          toast('Confirmation saved');
+        } catch (err) {
+          setStatus(String(err.message || err), true);
+          toast('Submit failed');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      loadReceipt();
+    })();
+  </script>
+</body>
+</html>

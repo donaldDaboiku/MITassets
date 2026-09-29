@@ -95,6 +95,7 @@ create table if not exists public.mit_allocation_requests (
   department text,
   subsidiary text,
   job_role text,
+  preferred_type text,
   notes text,
   signature_name text not null,
   confirmed_receipt boolean not null default false,
@@ -105,8 +106,24 @@ create table if not exists public.mit_allocation_requests (
   reject_reason text,
   processed_at timestamptz,
   processed_by text,
+  receipt_token text,
+  receipt_status text
+    check (receipt_status is null or receipt_status in ('pending', 'good', 'bad')),
+  receipt_note text,
+  receipt_confirmed_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+-- Safe upgrades for existing projects
+alter table public.mit_allocation_requests add column if not exists preferred_type text;
+alter table public.mit_allocation_requests add column if not exists receipt_token text;
+alter table public.mit_allocation_requests add column if not exists receipt_status text;
+alter table public.mit_allocation_requests add column if not exists receipt_note text;
+alter table public.mit_allocation_requests add column if not exists receipt_confirmed_at timestamptz;
+
+create unique index if not exists mit_allocation_requests_receipt_token_uidx
+  on public.mit_allocation_requests (receipt_token)
+  where receipt_token is not null;
 
 create index if not exists mit_allocation_requests_workspace_status_idx
   on public.mit_allocation_requests (workspace_id, status, created_at desc);

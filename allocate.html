@@ -13,29 +13,6 @@
       padding: 1.5rem 1rem 3rem;
     }
     .alloc-page .brand { margin-bottom: 1.25rem; }
-    .alloc-group { margin-bottom: 1rem; }
-    .alloc-group h3 {
-      font-size: 0.85rem;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: var(--muted);
-      margin-bottom: 0.5rem;
-    }
-    .alloc-device {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.65rem;
-      padding: 0.65rem 0.75rem;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--surface2);
-      margin-bottom: 0.4rem;
-      cursor: pointer;
-    }
-    .alloc-device:hover { border-color: var(--primary); }
-    .alloc-device input { margin-top: 0.2rem; }
-    .alloc-device strong { display: block; }
-    .alloc-device span { font-size: 0.85rem; color: var(--muted); }
     .alloc-status { margin: 0.75rem 0; }
     .alloc-status.error { color: var(--danger); }
     .alloc-status.ok { color: var(--success); }
@@ -50,22 +27,17 @@
       <span class="brand-icon">⚙</span>
       <div>
         <strong>MIT Asset</strong>
-        <small>New staff device allocation</small>
+        <small>New staff device request</small>
       </div>
     </div>
 
     <div class="panel">
-      <h2>Request devices</h2>
-      <p class="hint" id="allocConfigHint">Loading available devices…</p>
+      <h2>Request a device</h2>
+      <p class="hint" id="allocConfigHint">Checking link…</p>
+      <p class="hint">IT will assign an available device after reviewing your request. You will receive an email to confirm receipt (good / bad condition).</p>
       <p class="alloc-status" id="allocStatus" hidden></p>
 
       <form id="allocForm" class="form" hidden>
-        <fieldset style="border:0;padding:0;margin:0">
-          <legend style="font-weight:600;margin-bottom:0.5rem">Available devices</legend>
-          <div id="deviceList"></div>
-          <p class="hint" id="deviceEmpty" hidden>No available devices right now. Ask IT to mark stock as Available.</p>
-        </fieldset>
-
         <label>Full name
           <input type="text" name="fullName" required autocomplete="name" />
         </label>
@@ -83,8 +55,17 @@
         <label>Job role
           <input type="text" name="jobRole" placeholder="e.g. Analyst" />
         </label>
+        <label>Preferred device type (optional)
+          <select name="preferredType">
+            <option value="">No preference — IT will choose</option>
+            <option value="laptop">Laptop</option>
+            <option value="desktop">Desktop</option>
+            <option value="monitor">Monitor</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
         <label>Notes (optional)
-          <textarea name="notes" rows="2" placeholder="Preferred size, accessories…"></textarea>
+          <textarea name="notes" rows="2" placeholder="Accessories needed, location, timing…"></textarea>
         </label>
 
         <label>Type your full name as signature
@@ -92,12 +73,7 @@
         </label>
         <p class="sig-hint" id="sigHint">Signature must match your full name.</p>
 
-        <label class="toggle-item" style="flex-direction:row;align-items:flex-start;gap:0.6rem">
-          <input type="checkbox" name="confirmedReceipt" required style="margin-top:0.2rem" />
-          <span>I confirm receipt of the selected device(s) in good working condition.</span>
-        </label>
-
-        <button type="submit" class="btn btn-primary btn-block" id="allocSubmit">Submit allocation request</button>
+        <button type="submit" class="btn btn-primary btn-block" id="allocSubmit">Submit request</button>
       </form>
     </div>
   </div>
@@ -106,7 +82,6 @@
 
   <script>
     (function () {
-      // Public page: only project URL + workspace from query string — never anon/service keys.
       const params = new URLSearchParams(location.search);
       const supabaseUrl = String(params.get('supabaseUrl') || params.get('u') || '')
         .trim()
@@ -116,8 +91,6 @@
       const hint = document.getElementById('allocConfigHint');
       const statusEl = document.getElementById('allocStatus');
       const form = document.getElementById('allocForm');
-      const deviceList = document.getElementById('deviceList');
-      const deviceEmpty = document.getElementById('deviceEmpty');
       const sigHint = document.getElementById('sigHint');
       const toastEl = document.getElementById('toast');
 
@@ -145,11 +118,6 @@
         return na.length > 0 && na === nb;
       }
 
-      function typeLabel(type) {
-        const t = String(type || 'other');
-        return t.charAt(0).toUpperCase() + t.slice(1);
-      }
-
       function fnUrl() {
         return `${supabaseUrl}/functions/v1/device-allocation?workspace_id=${encodeURIComponent(workspaceId)}`;
       }
@@ -171,45 +139,7 @@
         }
       }
 
-      function renderDevices(devices) {
-        const groups = {};
-        devices.forEach((d) => {
-          const key = d.type || 'other';
-          if (!groups[key]) groups[key] = [];
-          groups[key].push(d);
-        });
-        const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
-        if (!keys.length) {
-          deviceList.innerHTML = '';
-          deviceEmpty.hidden = false;
-          return;
-        }
-        deviceEmpty.hidden = true;
-        deviceList.innerHTML = keys.map((type) => `
-          <div class="alloc-group">
-            <h3>${typeLabel(type)}</h3>
-            ${groups[type].map((d) => `
-              <label class="alloc-device">
-                <input type="checkbox" name="deviceIds" value="${String(d.id).replace(/"/g, '')}" />
-                <span>
-                  <strong>${escapeHtml(d.tag)} — ${escapeHtml(d.name)}</strong>
-                  <span>${escapeHtml(typeLabel(d.type))}</span>
-                </span>
-              </label>
-            `).join('')}
-          </div>
-        `).join('');
-      }
-
-      function escapeHtml(s) {
-        return String(s || '')
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;');
-      }
-
-      async function loadDevices() {
+      async function checkLink() {
         if (!supabaseUrl || !/^https:\/\//i.test(supabaseUrl)) {
           hint.textContent = 'Invalid link. Ask IT for the Device Allocation onboarding link from MIT Asset → Allocations.';
           return;
@@ -219,15 +149,14 @@
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
             if (res.status === 404) {
-              throw new Error('Allocation function not deployed — ask IT to run: supabase functions deploy device-allocation --no-verify-jwt');
+              throw new Error('Allocation function not deployed — ask IT to deploy device-allocation');
             }
             throw new Error(data.error || `HTTP ${res.status}`);
           }
-          hint.textContent = `Workspace: ${workspaceId} · ${ (data.devices || []).length } available device(s)`;
+          hint.textContent = `Workspace: ${workspaceId} · ready`;
           form.hidden = false;
-          renderDevices(data.devices || []);
         } catch (err) {
-          hint.textContent = 'Could not load devices. Check the link or ask IT to deploy the device-allocation function.';
+          hint.textContent = 'Could not reach allocation service. Check the link or ask IT to deploy the function.';
           setStatus(String(err.message || err), true);
         }
       }
@@ -241,19 +170,10 @@
         const fd = new FormData(form);
         const fullName = String(fd.get('fullName') || '').trim();
         const signatureName = String(fd.get('signatureName') || '').trim();
-        const deviceIds = [...form.querySelectorAll('input[name="deviceIds"]:checked')].map((el) => el.value);
 
         if (!namesMatch(fullName, signatureName)) {
           setStatus('Signature must match your full name.', true);
           updateSigHint();
-          return;
-        }
-        if (!deviceIds.length) {
-          setStatus('Select at least one device.', true);
-          return;
-        }
-        if (!fd.get('confirmedReceipt')) {
-          setStatus('Confirm receipt before submitting.', true);
           return;
         }
 
@@ -270,24 +190,17 @@
               department: String(fd.get('department') || '').trim(),
               subsidiary: String(fd.get('subsidiary') || '').trim(),
               jobRole: String(fd.get('jobRole') || '').trim(),
+              preferredType: String(fd.get('preferredType') || '').trim(),
               notes: String(fd.get('notes') || '').trim(),
               signatureName,
-              confirmedReceipt: true,
-              deviceIds,
             }),
           });
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            if (data.unavailable) {
-              throw new Error('Some devices were just taken — refresh and choose again.');
-            }
-            throw new Error(data.error || `HTTP ${res.status}`);
-          }
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
           form.reset();
           updateSigHint();
-          setStatus('Request submitted. IT will review and confirm your devices.', false);
-          toast('Allocation request sent');
-          await loadDevices();
+          setStatus('Request submitted. IT will assign a device and email you a receipt confirmation link.', false);
+          toast('Request sent');
         } catch (err) {
           setStatus(String(err.message || err), true);
           toast('Submit failed');
@@ -296,7 +209,7 @@
         }
       });
 
-      loadDevices();
+      checkLink();
     })();
   </script>
 </body>

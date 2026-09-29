@@ -1,7 +1,9 @@
-const CACHE = 'mit-asset-v47';
+const CACHE = 'mit-asset-v48';
 const ASSETS = [
   './',
   './index.html',
+  './allocate.html',
+  './allocate-receipt.html',
   './styles.css',
   './js/main.js',
   './js/utils.js',

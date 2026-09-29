@@ -54,8 +54,8 @@ supabase functions deploy device-allocation --no-verify-jwt
 
 3. In the app: enable Cloud Sync (Supabase URL + anon key + workspace id).
 4. Open **Allocations** → copy the **Onboarding link** (built from project URL + workspace only — never embeds the anon key).
-5. Share that link. Recipients open `allocate.html`, pick **available** devices, type a matching signature, confirm receipt, and submit.
-6. IT sees pending rows under **Allocations** → **Approve** (creates/matches device user, sets assets `active` + `usedBy`, logs via Assignment History) or **Reject**.
+5. Share that link. Recipients open `allocate.html` and submit a **request only** (no inventory is shown).
+6. IT opens **Allocations** → **Assign device**, picks available stock, and (with EmailJS enabled) emails a receipt link (`allocate-receipt.html`) so the recipient confirms **good** or **bad** condition.
 
 See `supabase/functions/device-allocation/README.md`.
 

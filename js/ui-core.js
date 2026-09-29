@@ -47,10 +47,23 @@ function pushModalSession() {
 }
 
 async function sendEmailAlert(userId, action, itemLabel, message) {
-  const s = state.settings;
-  if (!s.emailAlertsEnabled || !s.emailjsPublicKey || !s.emailjsServiceId || !s.emailjsTemplateId) return;
   const user = state.staff.find((x) => x.id === userId);
   if (!user?.email) return;
+  try {
+    await sendEmailToAddress(user.email, user.name, action, itemLabel, message);
+  } catch (_) {
+    /* staff alerts stay silent when EmailJS is off or fails */
+  }
+}
+
+/** Send via EmailJS to any address (allocation receipt, etc.). */
+export async function sendEmailToAddress(toEmail, toName, action, itemLabel, message) {
+  const s = state.settings;
+  if (!s.emailAlertsEnabled || !s.emailjsPublicKey || !s.emailjsServiceId || !s.emailjsTemplateId) {
+    throw new Error('Enable Email Alerts and configure EmailJS in Settings');
+  }
+  const email = String(toEmail || '').trim();
+  if (!email || !email.includes('@')) throw new Error('Valid recipient email required');
 
   try {
     const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
@@ -61,19 +74,26 @@ async function sendEmailAlert(userId, action, itemLabel, message) {
         template_id: s.emailjsTemplateId,
         user_id: s.emailjsPublicKey,
         template_params: {
-          to_email: user.email,
-          to_name: user.name,
-          subject: `[${s.appName}] ${action}: ${itemLabel}`,
+          to_email: email,
+          to_name: toName || email,
+          subject: `[${s.appName || 'MIT Asset'}] ${action}: ${itemLabel}`,
           message: message || `You have been assigned: ${itemLabel}`,
           item_label: itemLabel,
           action,
         },
       }),
     });
-    if (res.ok) logAutomation('Email Sent', `${action} → ${user.email}`);
-    else logAutomation('Email Failed', `HTTP ${res.status} for ${user.email}`);
-  } catch (_) {
-    logAutomation('Email Failed', `Could not reach EmailJS for ${user.email}`);
+    if (!res.ok) {
+      logAutomation('Email Failed', `HTTP ${res.status} for ${email}`);
+      throw new Error(`EmailJS HTTP ${res.status}`);
+    }
+    logAutomation('Email Sent', `${action} → ${email}`);
+  } catch (err) {
+    if (err?.message?.startsWith('EmailJS') || err?.message?.startsWith('Enable Email') || err?.message?.startsWith('Valid recipient')) {
+      throw err;
+    }
+    logAutomation('Email Failed', `Could not reach EmailJS for ${email}`);
+    throw new Error('Could not reach EmailJS');
   }
 }
 
@@ -2619,6 +2639,7 @@ function openModal(title, mode, id, bodyHtml) {
       : mode === 'asset-reassign' ? 'Reassign'
       : mode === 'accessory-replace' ? 'Save replacement'
       : mode === 'staff-subs' ? 'Save Subsidiaries'
+      : mode === 'allocation-approve' ? 'Assign & notify'
       : mode === 'qr' || mode === 'task-detail' || mode === 'asset-detail' ? 'Close'
       : 'Save';
   }
@@ -2629,11 +2650,24 @@ document.getElementById('modalCancel').addEventListener('click', () => {
   document.getElementById('modal').close();
 });
 
-document.getElementById('modalForm').addEventListener('submit', (e) => {
+document.getElementById('modalForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
   const data = Object.fromEntries(fd.entries());
   let flushTaskStatus = false;
+
+  if (modalMode === 'allocation-approve') {
+    const submitBtn = document.getElementById('modalSubmit');
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      const ok = await callHook('submitAllocationApprove', data, editId);
+      if (ok === false) return;
+      document.getElementById('modal').close();
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+    return;
+  }
 
   if (modalMode === 'asset') {
     const mySubs = staffSubsidiaries(getCurrentUser());
@@ -3707,6 +3741,7 @@ export function registerUiHooks() {
   setHook('applyBrandingToLogin', applyBrandingToLogin);
   setHook('updateNotifBadges', updateNotifBadges);
   setHook('sendEmailAlert', sendEmailAlert);
+  setHook('sendEmailToAddress', sendEmailToAddress);
   setHook('showPushNotification', showPushNotification);
   setHook('runAutomation', runAutomation);
   setHook('wireTaskAttachments', wireTaskAttachments);
