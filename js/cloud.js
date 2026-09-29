@@ -345,6 +345,7 @@ export async function syncOnBoot() {
 
   const cloudTime = new Date(row.updated_at).getTime();
   const localTime = state.lastSaved ? new Date(state.lastSaved).getTime() : 0;
+  const cloudAssets = Array.isArray(row.payload.assets) ? row.payload.assets : [];
   const localEmpty = !state.assets.length && !state.tasks.length && !state.documentation.length;
 
   if (localEmpty && row.payload) {
@@ -355,6 +356,23 @@ export async function syncOnBoot() {
     setCloudStatus(`Restored empty local from cloud · ${new Date(row.updated_at).toLocaleString()}`);
     try { await pullHeartbeats({ silent: true }); } catch (_) {}
     renderCloudPanel();
+    return;
+  }
+
+  // Local inventory wiped but cloud still has assets — restore assets without wiping tasks
+  if (!(state.assets || []).length && cloudAssets.length) {
+    state.assets = cloudAssets;
+    if (Array.isArray(row.payload.users) && !(state.users || []).length) {
+      state.users = row.payload.users;
+    }
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (_) {}
+    setCloudStatus(`Restored ${cloudAssets.length} assets from cloud · ${new Date(row.updated_at).toLocaleString()}`);
+    toast(`Restored ${cloudAssets.length} assets from cloud backup`);
+    try { await pullHeartbeats({ silent: true }); } catch (_) {}
+    renderCloudPanel();
+    callHook('renderAll');
     return;
   }
 

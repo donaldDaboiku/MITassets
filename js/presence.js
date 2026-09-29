@@ -2,7 +2,7 @@
  * Network presence — heartbeats + offline timeout.
  * Browser cannot scan LAN; agents POST heartbeats; PWA reconciles status.
  */
-import { state, saveState, logAutomation, canManageAsset } from './state.js';
+import { state, saveState, logAutomation } from './state.js';
 import { callHook, setHook } from './bridge.js';
 import { fmtDate } from './utils.js';
 
@@ -160,8 +160,8 @@ export function applyHeartbeatsToAssets(rows, { save = true } = {}) {
 
 /**
  * Dashboard / presence counts for devices that report heartbeats.
- * Includes available assets that have lastSeenAt / agentId (display only —
- * reconcilePresence still only toggles active ↔ offline).
+ * Counts all monitored devices (not subsidiary-scoped) so Online/Offline
+ * still reflects agents outside the current user's company filter.
  */
 export function presenceStats() {
   const now = Date.now();
@@ -171,7 +171,6 @@ export function presenceStats() {
 
   state.assets.forEach((a) => {
     ensureAssetPresenceFields(a);
-    if (!canManageAsset(a)) return;
     const monitored = !!(a.lastSeenAt || a.agentId || normalizeMac(a.macAddress));
     const presenceStatus = ['active', 'offline'].includes(a.status);
     if (!monitored && !presenceStatus) return;

@@ -711,7 +711,17 @@ function renderAssets() {
 
   const tbody = document.getElementById('assetsTable');
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="11" class="empty-state">No assets found. Click "+ Add Asset" to get started.</td></tr>';
+    const total = (state.assets || []).length;
+    const scoped = assetsInScope().length;
+    let msg = 'No assets found. Click "+ Add Asset" to get started.';
+    if (total === 0) {
+      msg = 'No assets in local inventory. Open Storage → Restore from Cloud if you had a backup.';
+    } else if (scoped === 0) {
+      msg = `No assets in your subsidiary scope (${total} in inventory). Ask an admin to add your companies under IT Team → Subsidiaries, or clear subsidiary limits.`;
+    } else if (statusF || typeF || search) {
+      msg = 'No assets match the current filters.';
+    }
+    tbody.innerHTML = `<tr><td colspan="11" class="empty-state">${esc(msg)}</td></tr>`;
     return;
   }
 
