@@ -38,11 +38,12 @@
       <p class="alloc-status" id="allocStatus" hidden></p>
 
       <form id="allocForm" class="form" hidden>
-        <label>Full name
-          <input type="text" name="fullName" required autocomplete="name" />
-        </label>
         <label>Work email
           <input type="email" name="email" required autocomplete="email" />
+        </label>
+        <p class="sig-hint" id="emailMatchHint">Enter your work email — if you are already in the directory, your name will fill in.</p>
+        <label>Full name
+          <input type="text" name="fullName" required autocomplete="name" />
         </label>
         <div class="form-row-2">
           <label>Department
@@ -92,7 +93,9 @@
       const statusEl = document.getElementById('allocStatus');
       const form = document.getElementById('allocForm');
       const sigHint = document.getElementById('sigHint');
+      const emailMatchHint = document.getElementById('emailMatchHint');
       const toastEl = document.getElementById('toast');
+      let lastLookupEmail = '';
 
       function toast(msg) {
         toastEl.textContent = msg;
@@ -139,6 +142,43 @@
         }
       }
 
+      async function lookupEmail() {
+        const email = String(form.email.value || '').trim();
+        if (!email || !email.includes('@') || !supabaseUrl) {
+          emailMatchHint.textContent = 'Enter your work email — if you are already in the directory, your name will fill in.';
+          emailMatchHint.className = 'sig-hint';
+          return;
+        }
+        if (email.toLowerCase() === lastLookupEmail) return;
+        lastLookupEmail = email.toLowerCase();
+        emailMatchHint.textContent = 'Looking up email…';
+        emailMatchHint.className = 'sig-hint';
+        try {
+          const res = await fetch(fnUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'lookup_user', workspaceId, email }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+          if (data.matched && data.name) {
+            if (!form.fullName.value.trim()) form.fullName.value = data.name;
+            if (!form.signatureName.value.trim()) form.signatureName.value = data.name;
+            if (data.department && !form.department.value.trim()) form.department.value = data.department;
+            if (data.subsidiary && !form.subsidiary.value.trim()) form.subsidiary.value = data.subsidiary;
+            emailMatchHint.textContent = `Matched directory user: ${data.name}`;
+            emailMatchHint.className = 'sig-hint good';
+            updateSigHint();
+          } else {
+            emailMatchHint.textContent = 'No directory match for this email — enter your name below.';
+            emailMatchHint.className = 'sig-hint';
+          }
+        } catch (_) {
+          emailMatchHint.textContent = 'Could not look up email — enter your name manually.';
+          emailMatchHint.className = 'sig-hint';
+        }
+      }
+
       async function checkLink() {
         if (!supabaseUrl || !/^https:\/\//i.test(supabaseUrl)) {
           hint.textContent = 'Invalid link. Ask IT for the Device Allocation onboarding link from MIT Asset → Allocations.';
@@ -163,10 +203,13 @@
 
       form.fullName.addEventListener('input', updateSigHint);
       form.signatureName.addEventListener('input', updateSigHint);
+      form.email.addEventListener('blur', lookupEmail);
+      form.email.addEventListener('change', () => { lastLookupEmail = ''; lookupEmail(); });
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         setStatus('');
+        await lookupEmail();
         const fd = new FormData(form);
         const fullName = String(fd.get('fullName') || '').trim();
         const signatureName = String(fd.get('signatureName') || '').trim();
@@ -198,6 +241,9 @@
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
           form.reset();
+          lastLookupEmail = '';
+          emailMatchHint.textContent = 'Enter your work email — if you are already in the directory, your name will fill in.';
+          emailMatchHint.className = 'sig-hint';
           updateSigHint();
           setStatus('Request submitted. IT will assign a device and email you a receipt confirmation link.', false);
           toast('Request sent');

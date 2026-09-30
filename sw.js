@@ -1,4 +1,4 @@
-const CACHE = 'mit-asset-v50';
+const CACHE = 'mit-asset-v51';
 const ASSETS = [
   './',
   './index.html',

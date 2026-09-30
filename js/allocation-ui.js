@@ -69,14 +69,22 @@ function ensureDeviceUserFromRequest(row) {
   ensureUsersArray();
   const email = String(row.email || '').trim();
   const name = String(row.full_name || '').trim();
-  let id = (email && findUserByNameOrEmail(email)) || (name && findUserByNameOrEmail(name)) || '';
+  // Prefer email match so directory users link correctly
+  const byEmail = email ? findUserByNameOrEmail(email) : '';
+  const byName = !byEmail && name ? findUserByNameOrEmail(name) : '';
+  let id = byEmail || byName || '';
   if (id) {
     const u = state.users.find((x) => x.id === id);
     if (u) {
       if (email) u.email = email;
-      if (name) u.name = name;
-      if (row.department) u.department = row.department;
-      if (row.subsidiary) u.subsidiary = row.subsidiary;
+      // Email match: keep existing directory name; only fill if blank
+      if (byEmail) {
+        if (!u.name && name) u.name = name;
+      } else if (name) {
+        u.name = name;
+      }
+      if (row.department && !u.department) u.department = row.department;
+      if (row.subsidiary && !u.subsidiary) u.subsidiary = row.subsidiary;
     }
     return id;
   }
@@ -89,6 +97,15 @@ function ensureDeviceUserFromRequest(row) {
     subsidiary: row.subsidiary || '',
   });
   return id;
+}
+
+function matchedDirectoryUser(row) {
+  ensureUsersArray();
+  const email = String(row.email || '').trim();
+  if (!email) return null;
+  const id = findUserByNameOrEmail(email);
+  if (!id) return null;
+  return state.users.find((x) => x.id === id) || null;
 }
 
 async function fetchAllocationRequests() {
@@ -187,6 +204,7 @@ function renderAllocationTable() {
   }
   tbody.innerHTML = cachedRequests.map((r) => {
     const when = r.created_at ? new Date(r.created_at).toLocaleString() : '—';
+    const dirMatch = matchedDirectoryUser(r);
     const actions = r.status === 'pending'
       ? `<button type="button" class="btn btn-sm btn-primary" data-approve-alloc="${esc(r.id)}">Assign device</button>
          <button type="button" class="btn btn-sm btn-secondary" data-reject-alloc="${esc(r.id)}">Reject</button>`
@@ -198,7 +216,9 @@ function renderAllocationTable() {
           }</span>`);
     return `<tr>
       <td>${esc(when)}</td>
-      <td><strong>${esc(r.full_name)}</strong><div class="meta">${esc(r.email || '')}</div></td>
+      <td><strong>${esc(r.full_name)}</strong><div class="meta">${esc(r.email || '')}${
+        dirMatch ? ` · matched: ${esc(dirMatch.name)}` : ''
+      }</div></td>
       <td>${esc(r.department || '—')}<div class="meta">${esc(r.subsidiary || '')}</div></td>
       <td>${esc(r.job_role || '—')}${r.preferred_type ? `<div class="meta">Pref: ${esc(typeLabel(r.preferred_type))}</div>` : ''}</td>
       <td>${esc(devicesLabel(r))}</td>
@@ -246,6 +266,11 @@ function openAssignModal(id) {
     </label>
   `).join('');
 
+  const matched = matchedDirectoryUser(row);
+  const matchHint = matched
+    ? `<p class="hint" style="color:var(--success)">Directory match by email: <strong>${esc(matched.name)}</strong>${matched.department ? ` · ${esc(matched.department)}` : ''}</p>`
+    : `<p class="hint">No directory user with this email yet — a device user will be created from the request.</p>`;
+
   callHook(
     'openModal',
     `Assign device — ${row.full_name}`,
@@ -255,6 +280,7 @@ function openAssignModal(id) {
       <p class="hint">Select one or more <strong>available</strong> devices for ${esc(row.full_name)} (${esc(row.email)}).
       ${row.preferred_type ? ` Preferred: <strong>${esc(typeLabel(row.preferred_type))}</strong>.` : ''}
       After assign, an email asks them to confirm receipt (good / bad).</p>
+      ${matchHint}
       ${row.notes ? `<p class="hint">Notes: ${esc(row.notes)}</p>` : ''}
       <div style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:0.35rem;margin:0.75rem 0">
         ${options}

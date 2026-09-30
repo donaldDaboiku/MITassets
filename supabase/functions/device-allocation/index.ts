@@ -37,6 +37,31 @@ function getClient() {
   );
 }
 
+async function loadWorkspacePayload(supabase, workspaceId) {
+  const { data, error } = await supabase
+    .from('mit_workspace')
+    .select('payload')
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.payload && typeof data.payload === 'object' ? data.payload : {};
+}
+
+/** Match device user by email (exact) from cloud inventory. */
+function findUserByEmail(payload, email) {
+  const q = String(email || '').trim().toLowerCase();
+  if (!q || !q.includes('@')) return null;
+  const users = Array.isArray(payload?.users) ? payload.users : [];
+  const hit = users.find((u) => String(u?.email || '').trim().toLowerCase() === q);
+  if (!hit) return null;
+  return {
+    name: String(hit.name || '').trim(),
+    email: String(hit.email || '').trim(),
+    department: String(hit.department || '').trim(),
+    subsidiary: String(hit.subsidiary || '').trim(),
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: cors });
@@ -68,6 +93,23 @@ Deno.serve(async (req) => {
     const supabase = getClient();
     const ws =
       String(body.workspaceId || body.workspace_id || workspaceId || 'main').trim() || 'main';
+
+    if (action === 'lookup_user') {
+      const email = String(body.email || '').trim();
+      if (!email || !email.includes('@')) {
+        return json({ matched: false, error: 'Valid email required' }, 400);
+      }
+      const payload = await loadWorkspacePayload(supabase, ws);
+      const user = findUserByEmail(payload, email);
+      if (!user?.name) return json({ matched: false });
+      return json({
+        matched: true,
+        name: user.name,
+        email: user.email,
+        department: user.department || '',
+        subsidiary: user.subsidiary || '',
+      });
+    }
 
     if (action === 'receipt_lookup') {
       const token = String(body.token || '').trim();
@@ -136,17 +178,32 @@ Deno.serve(async (req) => {
     }
 
     // ── Create allocation request (no public device selection) ──────────────
-    const fullName = String(body.fullName || body.full_name || '').trim();
+    let fullName = String(body.fullName || body.full_name || '').trim();
     const email = String(body.email || '').trim();
-    const department = String(body.department || '').trim();
-    const subsidiary = String(body.subsidiary || body.company || '').trim();
+    let department = String(body.department || '').trim();
+    let subsidiary = String(body.subsidiary || body.company || '').trim();
     const jobRole = String(body.jobRole || body.job_role || '').trim();
     const preferredType = String(body.preferredType || body.preferred_type || '').trim();
     const notes = String(body.notes || '').trim();
-    const signatureName = String(body.signatureName || body.signature_name || '').trim();
+    let signatureName = String(body.signatureName || body.signature_name || '').trim();
+
+    if (!email || !email.includes('@')) return json({ error: 'Valid email is required' }, 400);
+
+    // Harvest email → fill name/dept/subsidiary from existing device users when available
+    try {
+      const payload = await loadWorkspacePayload(supabase, ws);
+      const known = findUserByEmail(payload, email);
+      if (known?.name) {
+        if (!fullName) fullName = known.name;
+        if (!department && known.department) department = known.department;
+        if (!subsidiary && known.subsidiary) subsidiary = known.subsidiary;
+        if (!signatureName) signatureName = known.name;
+      }
+    } catch (_) {
+      /* lookup optional — create still works */
+    }
 
     if (!fullName) return json({ error: 'Full name is required' }, 400);
-    if (!email || !email.includes('@')) return json({ error: 'Valid email is required' }, 400);
     if (!namesMatch(fullName, signatureName)) {
       return json({ error: 'Signature must match full name exactly' }, 400);
     }
