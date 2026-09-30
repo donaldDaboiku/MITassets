@@ -1,4 +1,4 @@
-image.png/**
+/**
  * MIT Asset Agent management — lists mit_agents, enable/disable, revoke tokens.
  */
 import { esc, toast, badge } from './utils.js';
