@@ -545,6 +545,11 @@ function navigateToView(view, opts = {}) {
   if (opts.assetStatus !== undefined) {
     const el = document.getElementById('assetFilterStatus');
     if (el) el.value = opts.assetStatus;
+  } else if (view === 'assets' && !opts.keepAssetFilters) {
+    const statusEl = document.getElementById('assetFilterStatus');
+    const typeEl = document.getElementById('assetFilterType');
+    if (statusEl) statusEl.value = '';
+    if (typeEl) typeEl.value = '';
   }
   if (opts.taskStatus !== undefined) {
     const el = document.getElementById('taskFilterStatus');
@@ -719,9 +724,13 @@ function renderAssets() {
     } else if (scoped === 0) {
       msg = `No assets in your subsidiary scope (${total} in inventory). Ask an admin to add your companies under IT Team → Subsidiaries, or clear subsidiary limits.`;
     } else if (statusF || typeF || search) {
-      msg = 'No assets match the current filters.';
+      msg = 'No assets match the current filters. Clear status/type filters or the search box.';
     }
-    tbody.innerHTML = `<tr><td colspan="11" class="empty-state">${esc(msg)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="empty-state">${esc(msg)}${
+      (statusF || typeF || search) && scoped > 0
+        ? '<div style="margin-top:0.75rem"><button type="button" class="btn btn-sm btn-secondary" id="clearAssetFiltersBtn">Clear filters</button></div>'
+        : ''
+    }</td></tr>`;
     return;
   }
 
@@ -2881,6 +2890,17 @@ document.getElementById('modalForm').addEventListener('submit', async (e) => {
 /* ── Filters & Search ── */
 ['assetFilterStatus', 'assetFilterType', 'taskFilterStatus', 'taskFilterPriority', 'taskFilterDate', 'taskFilterDateMode'].forEach((id) => {
   document.getElementById(id)?.addEventListener('change', renderAll);
+});
+
+document.getElementById('assetsTable')?.addEventListener('click', (e) => {
+  if (!e.target.closest('#clearAssetFiltersBtn')) return;
+  const statusEl = document.getElementById('assetFilterStatus');
+  const typeEl = document.getElementById('assetFilterType');
+  const searchEl = document.getElementById('globalSearch');
+  if (statusEl) statusEl.value = '';
+  if (typeEl) typeEl.value = '';
+  if (searchEl) searchEl.value = '';
+  renderAll();
 });
 
 document.getElementById('taskDateTodayBtn')?.addEventListener('click', () => {

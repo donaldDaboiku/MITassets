@@ -96,6 +96,7 @@
       const emailMatchHint = document.getElementById('emailMatchHint');
       const toastEl = document.getElementById('toast');
       let lastLookupEmail = '';
+      let lookupAbort = null;
 
       function toast(msg) {
         toastEl.textContent = msg;
@@ -142,22 +143,27 @@
         }
       }
 
-      async function lookupEmail() {
+      async function lookupEmail(opts = {}) {
+        const force = !!opts.force;
         const email = String(form.email.value || '').trim();
         if (!email || !email.includes('@') || !supabaseUrl) {
           emailMatchHint.textContent = 'Enter your work email — if you are already in the directory, your name will fill in.';
           emailMatchHint.className = 'sig-hint';
           return;
         }
-        if (email.toLowerCase() === lastLookupEmail) return;
-        lastLookupEmail = email.toLowerCase();
+        const emailLc = email.toLowerCase();
+        if (!force && emailLc === lastLookupEmail) return;
+        lastLookupEmail = emailLc;
+        if (lookupAbort) lookupAbort.abort();
+        lookupAbort = typeof AbortController !== 'undefined' ? new AbortController() : null;
         emailMatchHint.textContent = 'Looking up email…';
         emailMatchHint.className = 'sig-hint';
         try {
           const res = await fetch(fnUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'lookup_user', workspaceId, email }),
+            body: JSON.stringify({ action: 'lookup_user', workspaceId, email: emailLc }),
+            signal: lookupAbort?.signal,
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -173,7 +179,8 @@
             emailMatchHint.textContent = 'No directory match for this email — enter your name below.';
             emailMatchHint.className = 'sig-hint';
           }
-        } catch (_) {
+        } catch (err) {
+          if (err?.name === 'AbortError') return;
           emailMatchHint.textContent = 'Could not look up email — enter your name manually.';
           emailMatchHint.className = 'sig-hint';
         }
@@ -203,16 +210,17 @@
 
       form.fullName.addEventListener('input', updateSigHint);
       form.signatureName.addEventListener('input', updateSigHint);
-      form.email.addEventListener('blur', lookupEmail);
+      form.email.addEventListener('blur', () => lookupEmail());
       form.email.addEventListener('change', () => { lastLookupEmail = ''; lookupEmail(); });
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         setStatus('');
-        await lookupEmail();
+        await lookupEmail({ force: true });
         const fd = new FormData(form);
         const fullName = String(fd.get('fullName') || '').trim();
         const signatureName = String(fd.get('signatureName') || '').trim();
+        const email = String(fd.get('email') || '').trim().toLowerCase();
 
         if (!namesMatch(fullName, signatureName)) {
           setStatus('Signature must match your full name.', true);
@@ -229,7 +237,7 @@
             body: JSON.stringify({
               workspaceId,
               fullName,
-              email: String(fd.get('email') || '').trim(),
+              email,
               department: String(fd.get('department') || '').trim(),
               subsidiary: String(fd.get('subsidiary') || '').trim(),
               jobRole: String(fd.get('jobRole') || '').trim(),

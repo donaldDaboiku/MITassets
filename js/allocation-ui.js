@@ -11,6 +11,7 @@ import {
   ensureUsersArray,
   findUserByNameOrEmail,
   logAssignment,
+  canManageAsset,
 } from './state.js';
 import { setHook, callHook } from './bridge.js';
 import {
@@ -59,7 +60,9 @@ function devicesLabel(row) {
 
 function availableAssetsForAssign(preferredType) {
   const pref = String(preferredType || '').toLowerCase();
-  const list = (state.assets || []).filter((a) => String(a.status || '').toLowerCase() === 'available');
+  const list = (state.assets || []).filter(
+    (a) => String(a.status || '').toLowerCase() === 'available' && canManageAsset(a)
+  );
   if (!pref) return list;
   const matched = list.filter((a) => String(a.type || '').toLowerCase() === pref);
   return matched.length ? matched : list;
@@ -68,20 +71,34 @@ function availableAssetsForAssign(preferredType) {
 function ensureDeviceUserFromRequest(row) {
   ensureUsersArray();
   const email = String(row.email || '').trim();
+  const emailLc = email.toLowerCase();
   const name = String(row.full_name || '').trim();
   // Prefer email match so directory users link correctly
   const byEmail = email ? findUserByNameOrEmail(email) : '';
-  const byName = !byEmail && name ? findUserByNameOrEmail(name) : '';
+  let byName = '';
+  if (!byEmail && name) {
+    const nameId = findUserByNameOrEmail(name);
+    if (nameId) {
+      const existing = state.users.find((x) => x.id === nameId);
+      const existingEmail = String(existing?.email || '').trim().toLowerCase();
+      // Name-only: never attach to someone who already has a different email
+      if (existingEmail && emailLc && existingEmail !== emailLc) {
+        byName = '';
+      } else {
+        byName = nameId;
+      }
+    }
+  }
   let id = byEmail || byName || '';
   if (id) {
     const u = state.users.find((x) => x.id === id);
     if (u) {
-      if (email) u.email = email;
-      // Email match: keep existing directory name; only fill if blank
       if (byEmail) {
+        if (email) u.email = email;
         if (!u.name && name) u.name = name;
-      } else if (name) {
-        u.name = name;
+      } else {
+        if (email && !String(u.email || '').trim()) u.email = email;
+        if (name) u.name = name;
       }
       if (row.department && !u.department) u.department = row.department;
       if (row.subsidiary && !u.subsidiary) u.subsidiary = row.subsidiary;
@@ -339,6 +356,8 @@ async function submitAllocationApprove(data, requestId) {
   const skipped = [];
   const assigned = [];
   const deviceSnapshots = [];
+  const rollbacks = [];
+  const historyPending = [];
 
   deviceIds.forEach((assetId) => {
     const asset = state.assets.find((a) => a.id === assetId);
@@ -346,22 +365,23 @@ async function submitAllocationApprove(data, requestId) {
       skipped.push(`${assetId} (missing)`);
       return;
     }
+    if (!canManageAsset(asset)) {
+      skipped.push(`${asset.tag || assetId} (out of scope)`);
+      return;
+    }
     if (String(asset.status).toLowerCase() !== 'available') {
       skipped.push(`${asset.tag || assetId} (${asset.status})`);
       return;
     }
     const prev = asset.usedBy || '';
+    rollbacks.push({ id: asset.id, usedBy: prev, status: asset.status });
     asset.usedBy = userId;
     asset.status = 'active';
-    logAssignment(
-      'asset',
-      asset.id,
-      `${asset.tag} — ${asset.name}`,
-      'Assigned to user (allocation)',
+    historyPending.push({
+      asset,
       prev,
-      userId,
-      `Onboarding: ${row.full_name}${row.job_role ? ` · ${row.job_role}` : ''}`
-    );
+      note: `Onboarding: ${row.full_name}${row.job_role ? ` · ${row.job_role}` : ''}`,
+    });
     assigned.push(asset.tag || asset.id);
     deviceSnapshots.push({
       id: asset.id,
@@ -378,16 +398,18 @@ async function submitAllocationApprove(data, requestId) {
     return false;
   }
 
-  saveState();
   const processor = getCurrentUser()?.name || 'IT';
-  const receiptToken = uid() + uid();
+  const receiptToken = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')
+    : uid() + uid();
+  const assignedIds = deviceSnapshots.map((d) => d.id);
 
   try {
     await updateRequestRow(requestId, {
       status: 'approved',
       processed_at: new Date().toISOString(),
       processed_by: processor,
-      device_ids: deviceIds,
+      device_ids: assignedIds,
       devices: deviceSnapshots,
       confirmed_receipt: false,
       receipt_token: receiptToken,
@@ -397,16 +419,36 @@ async function submitAllocationApprove(data, requestId) {
       reject_reason: skipped.length ? `Skipped: ${skipped.join('; ')}` : null,
     });
   } catch (err) {
-    toast(`Devices assigned locally, but cloud update failed: ${err.message || err}`);
-    callHook('renderAll');
+    rollbacks.forEach((rb) => {
+      const a = state.assets.find((x) => x.id === rb.id);
+      if (a) {
+        a.usedBy = rb.usedBy;
+        a.status = rb.status;
+      }
+    });
+    toast(`Assign failed — inventory unchanged: ${err.message || err}`);
     return false;
   }
+
+  historyPending.forEach(({ asset, prev, note }) => {
+    logAssignment(
+      'asset',
+      asset.id,
+      `${asset.tag} — ${asset.name}`,
+      'Assigned to user (allocation)',
+      prev,
+      userId,
+      note
+    );
+  });
+  saveState();
 
   if (sendEmail) {
     try {
       await sendReceiptEmail(row, receiptToken, deviceSnapshots);
     } catch (err) {
       toast(`Assigned, but email failed: ${err.message || err}. Use Resend receipt email.`);
+      callHook('renderAll');
       await renderAllocations();
       return true;
     }
@@ -527,6 +569,13 @@ export function runAllocationSelfCheck() {
   const link = `https://app.example/allocate.html?supabaseUrl=${encodeURIComponent(fake)}&workspace=main`;
   if (/anon|eyJ|service_role/i.test(link)) throw new Error('link must not embed secrets');
   if (!link.includes('allocate.html')) throw new Error('expected allocate.html');
+  const receipt = buildReceiptLink('tok123');
+  if (receipt && !receipt.includes('allocate-receipt.html')) {
+    throw new Error('receipt link must target allocate-receipt.html');
+  }
+  if (receipt && !receipt.includes('token=tok123')) {
+    throw new Error('receipt link must include token');
+  }
   return true;
 }
 

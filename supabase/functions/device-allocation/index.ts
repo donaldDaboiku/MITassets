@@ -2,6 +2,7 @@
 // Deploy: supabase functions deploy device-allocation --no-verify-jwt
 //
 // GET  ?workspace_id=main  → { ok, workspace_id }  (no device inventory to the public)
+// POST { action: 'lookup_user', email } → directory match from workspace payload
 // POST create request (no device pick) → pending row
 // POST { action: 'receipt_lookup' | 'confirm_receipt', token, ... }
 
@@ -95,7 +96,7 @@ Deno.serve(async (req) => {
       String(body.workspaceId || body.workspace_id || workspaceId || 'main').trim() || 'main';
 
     if (action === 'lookup_user') {
-      const email = String(body.email || '').trim();
+      const email = String(body.email || '').trim().toLowerCase();
       if (!email || !email.includes('@')) {
         return json({ matched: false, error: 'Valid email required' }, 400);
       }
@@ -179,7 +180,7 @@ Deno.serve(async (req) => {
 
     // ── Create allocation request (no public device selection) ──────────────
     let fullName = String(body.fullName || body.full_name || '').trim();
-    const email = String(body.email || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
     let department = String(body.department || '').trim();
     let subsidiary = String(body.subsidiary || body.company || '').trim();
     const jobRole = String(body.jobRole || body.job_role || '').trim();
